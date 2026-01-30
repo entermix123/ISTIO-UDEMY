@@ -1,0 +1,13 @@
+Course Downloads
+
+You can find the downloads for the course attached to this lecture - check the "Resources" button and you can download from there.
+
+Use the arm64 version if you are running a Mac with the Apple silicon (ie Mac M1, M2, etc)
+
+Use the x86_amd64 version for Intel or AMD based platforms (basically, anything else, use this version if not sure!)
+
+Note: the files have been tested against Kubernetes version 1.25 - they may not work on older versions of kubernetes. So you may need to upgrade your minikube (or kubernetes cluster) to the latest version. Don't forget to also update your kubectl to a matching version.
+
+If you prefer, you can also download from the GitHub repository at https://github.com/DickChesterwood/istio-fleetman
+Resources for this lecture
+

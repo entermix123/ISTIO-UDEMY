@@ -1,0 +1,36 @@
+What is Istio? - Service mesh
+
+Service Mesh
+------------
+An extra layer of software we deploy alongside our Kubernetes cluster. This service helps us manage our cluster traffic (between every separate microservice). 
+
+Popular features o mesh services are: 
+	- telemetry (gathering metrics for individual network requests), 
+	- tracing - allow us to take complex chains of network calls that are wired together to implement a single usecase.
+		- what was the chain exactly
+		- how long each step in the chain took
+		- what was happening in the chain 
+	- security integration
+	- traffic management - rerouting requests on particular requirements we have.  
+
+
+How Istio implements a Mesh
+---------------------------
+Istio install an additional container called Proxy in every pod that makes network calls to the main pod container. The mesh logic is implemented in this additional Proxy container. The proxies are collectively called "Data Plane" in Istio.
+
+
+Istio namespace
+---------------
+Istion installation namepsace is called 'istio-system'. 
+
+The main Istio system container is called istiod (Istio Daemon), used to be called pilot. This container is responsible for the telemetry. For example the istiod container is called for time/date every time request is made.
+
+Another Istion pod component is called Kiali UI. Kiali UI is the visualizing tool the is used to present pods connections and how they work together.
+
+There are 6 different pods in the Istio control plane that we will go over in this course.
+
+
+
+
+
+
