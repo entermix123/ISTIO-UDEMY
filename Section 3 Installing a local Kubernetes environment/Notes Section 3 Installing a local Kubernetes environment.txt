@@ -122,14 +122,83 @@ Under "Docker Desktop"->Settings->General->"Virtual Machine Options", ensure tha
 We are aware that this setting may affect the ability for the images for Kiali and Jaeger to run correctly.
 
 
-We will work with Docker Desktop Kubernetes cluster. 
 
 
 9. (Optional) Installing Minikube
 =================================
 
+We are working on Windows so we will install Windows packages.
+
+1. Download and run the installer for the latest release. 
+	power shell --> New-Item -Path 'c:\' -Name 'minikube' -ItemType Directory -Force
+$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -OutFile 'c:\minikube\minikube.exe' -Uri 'https://github.com/kubernetes/minikube/releases/latest/download/minikube-windows-amd64.exe' -UseBasicParsing
+
+2. Add the minikube.exe binary to your PATH. 
+	power shell --> $oldPath = [Environment]::GetEnvironmentVariable('Path', [EnvironmentVariableTarget]::User)
+if ($oldPath.Split(';') -inotcontains 'C:\minikube'){
+  [Environment]::SetEnvironmentVariable('Path', $('{0};C:\minikube' -f $oldPath), [EnvironmentVariableTarget]::User)
+}
+
+3. Restart power shell and verify Minikube installation
+	power shell --> minikube version
+	
+	# result:
+	minikube version: v1.38.0
+	commit: de81223c61ab1bd97dcfcfa6d9d5c59e
+
+
+
+Install kubectl if not installed yet
+------------------------------------
+
+Installation instructions - https://minikube.sigs.k8s.io/docs/handbook/kubectl/#Windows
+	power shell --> minikube kubectl
+
+
+
+
 10. (Optional) Choosing a Minikube Driver
 =========================================
+
+We can see what drivers we can use for Minikube - https://minikube.sigs.k8s.io/docs/drivers/
+
+We will use Docker as Driver for Minikube - https://minikube.sigs.k8s.io/docs/drivers/docker/
+
+As we already have Docker Desktop installed we don't need to install Docker again.
+
+Set Docker as Minikube driver 
+	power shell --> minikube config set driver docker
+
+	# result: ! These changes will take effect upon a minikube delete and then a minikube start
+
+
+MINIKUBE USAGE EXAMPLE
+----------------------
+
+Start minikube cluster if we didn't set prefered driver
+	terminal --> minikube start --driver=docker --memory 4096
+
+
+Start minikube cluster with the default driver (docker) and alocate minimum memory size
+	terminal --> minikube start --memory 4096
+
+
+We can reset minikube if start to be slugish
+	terminal --> minikube delete
+
+Reapply all our work
+	terminal --> minikube start --memory 4096
+
+
+
+
+
+
+
+
+
+
+
 
 
 
