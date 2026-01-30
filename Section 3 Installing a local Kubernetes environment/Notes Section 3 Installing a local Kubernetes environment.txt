@@ -1,0 +1,138 @@
+Section 3 Installing a local Kubernetes environment
+===================================================
+
+Section content:
+----------------
+4. What to do if you need to install Kubernetes locally?
+5. (Optional) Choosing between Docker Desktop and Minikube
+6. (Optional) How to Install Docker Desktop
+7. (Optional) How to Run Kubernetes in Docker Desktop
+8. Extra note for Desktop users using a Mac with Apple Silicon (M1, M2, M3 etc)
+9. (Optional) Installing Minikube
+10. (Optional) Choosing a Minikube Driver
+
+
+
+
+
+4. What to do if you need to install Kubernetes locally?
+========================================================
+
+We can install Istio on any Kubernetes cluster eather it is running with minikube or Kind or Kubeadm or other. The file we will use is called '2-istio-minikube.yaml'.
+
+
+
+5. (Optional) Choosing between Docker Desktop and Minikube
+==========================================================
+
+Minikube has complex installation.
+
+To go along with the course we need to install 
+	1. Docker Desktop - the most easy way to create a local Kubernetes cluster.
+		- https://www.docker.com/products/docker-desktop/
+
+	2. Kubectl - prodcution standard command line interface (CLI) that manage Kubernetes resources.
+		- https://kubernetes.io/docs/tasks/tools/#kubectl
+
+
+
+
+6. (Optional) How to Install Docker Desktop
+===========================================
+
+Register, download and install Docker Desktop - https://www.docker.com/products/docker-desktop/
+
+If we have a problem with Docker Desktop Installation we should enable Windows features:
+	- Virtual Machine Platform
+	- Windows Subsystem for Linux
+
+
+
+
+7. (Optional) How to Run Kubernetes in Docker Desktop
+=====================================================
+
+We need to install 'kubectl' on our OS.
+
+Kubectl - prodcution standard command line interface (CLI) that manage Kubernetes resources.
+	- https://kubernetes.io/docs/tasks/tools/#kubectl
+
+Check if we have kiubectl installed
+	terminal --> kubectl version
+
+	# result:
+	Client Version: v1.34.0		# this is the result we are looking for (newer version is possible)
+	Kustomize Version: v5.7.1
+
+
+Start Kubernetes in Docker Desktop/Kubernetes
+	- Create Kubernetes Cluster
+		- Cluster Type: 
+			Kubeadm
+			Create a single-node cluster with kubeadm.
+			Version: v1.34.1
+		- Create Cluster
+		
+	- Wait until the cluster is installed and running
+
+
+If we have used kubectk with another cluster we need to switch kubectil context to Kubernetes cluster
+	terminal --> kubectl config use-context docker-desktop
+
+Verify if the kubectl is working properly with the created cluster
+	terminal --> kubectl version
+
+	# result:
+	Client Version: v1.34.0
+	Kustomize Version: v5.7.1
+	Server Version: v1.34.1
+
+	## We should upadte kubectl version if the version between kubecl and server are more than a minor version 1.34.x
+
+
+Confirm cluster connectivity:
+	terminal --> kubectl cluster-info
+
+	# result:
+	Kubernetes control plane is running at https://kubernetes.docker.internal:6443
+	CoreDNS is running at https://kubernetes.docker.internal:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+	To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+List Nodes of our cluster:
+	terminal --> kubectl get nodes
+
+	# result:
+	NAME             STATUS   ROLES           AGE    VERSION
+	docker-desktop   Ready    control-plane   7m1s   v1.34.1
+
+
+
+
+
+
+8. Extra note for Desktop users using a Mac with Apple Silicon (M1, M2, M3 etc)
+===============================================================================
+
+Extra note for Desktop users using a Mac with Apple Silicon (M1, M2, M3 etc)
+
+Please check the following option in the settings for Docker Desktop:
+
+Under "Docker Desktop"->Settings->General->"Virtual Machine Options", ensure that "Docker VMM"  is selected (Rosetta may have been the default).
+
+We are aware that this setting may affect the ability for the images for Kiali and Jaeger to run correctly.
+
+
+We will work with Docker Desktop Kubernetes cluster. 
+
+
+9. (Optional) Installing Minikube
+=================================
+
+10. (Optional) Choosing a Minikube Driver
+=========================================
+
+
+
+
+
+
