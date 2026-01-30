@@ -1,0 +1,469 @@
+Section 4 Hands on Demo
+=======================
+
+Section content:
+----------------
+
+11. What to expect in this section
+12. Note for Docker Desktop Users
+13. Getting Istio Running
+14. Enabling Sidecar Injection
+15. Visualizing the System with Kiali
+16. Finding Performance Problems
+
+
+
+
+
+11. What to expect in this section
+==================================
+
+What to expect in this section
+
+In this section of the course, I aim to give a quick high-level overview of what Istio is, and what it can do for you.
+
+To do this, we are going to deploy a broken system to Kubernetes.
+
+On the videos, you will see my system run slowly, however it is also expected that you will might also get lots of 503 errors.
+
+This is good and is part of the demo - don't panic, the point is that we use Istio to find out why, and we also patch in a quick fix and (hopefully) everything will then magically work.
+
+So don't worry if you get 503s popping up or a really sluggish app. But, if the app doesn't run at all - like a blank screen, then do contact us through the Q&A!
+
+
+
+
+
+12. Note for Docker Desktop Users
+=================================
+
+Note for Docker Desktop Users
+
+If you're using Docker Desktop, then you will use the IP address of "localhost" or "127.0.0.1".
+
+For example, to access the webapp, use "127.0.0.1:30080".
+
+If you have any problems connecting, this may be caused by a bug in Desktop that causes NodePorts to be inaccessible.
+
+Try the following workaround:
+	terminal --> kubectl port-forward svc/fleetman-webapp 30080:80
+
+Leave this command running and now "localhost:30080" should be accessible - let me know if you're still stuck.
+
+
+
+
+13. Getting Istio Running
+=========================
+
+We will use resource folder warmup-exercise.
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-application-full-stack.yaml
+
+
+Delete previous minikube work
+	terminal --> minikube delete
+
+Start on clean minikube setup
+	terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+# result:
+* minikube v1.38.0 on Microsoft Windows 11 Home 25H2
+* Using the docker driver based on user configuration
+! Starting v1.39.0, minikube will default to "containerd" container runtime. See #21973 for more info.
+* Using Docker Desktop driver with root privileges
+* Starting "minikube" primary control-plane node in "minikube" cluster
+* Pulling base image v0.0.49 ...
+* Downloading Kubernetes v1.35.0 preload ...
+    > preloaded-images-k8s-v18-v1...:  271.45 MiB / 271.45 MiB  100.00% 7.59 Mi
+    > gcr.io/k8s-minikube/kicbase...:  514.16 MiB / 514.16 MiB  100.00% 6.83 Mi
+* Creating docker container (CPUs=2, Memory=4096MB) ...
+! Failing to connect to https://registry.k8s.io/ from inside the minikube container
+* To pull new external images, you may need to configure a proxy: https://minikube.sigs.k8s.io/docs/reference/networking/proxy/
+* Preparing Kubernetes v1.35.0 on Docker 29.2.0 ...
+* Configuring bridge CNI (Container Networking Interface) ...
+* Verifying Kubernetes components...
+  - Using image gcr.io/k8s-minikube/storage-provisioner:v5
+* Enabled addons: storage-provisioner, default-storageclass
+* Done! kubectl is now configured to use "minikube" cluster and "default" namespace by default
+
+
+INSTALL ISTIO
+-------------
+Navigate to resource folder
+	terminal --> cd warmup-exercise
+
+Perform Istio initialization
+	terminal --> kubectl apply -f .\1-istio-init.yaml
+
+	# result:
+	namespace/istio-system created
+	customresourcedefinition.apiextensions.k8s.io/authorizationpolicies.security.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/destinationrules.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/envoyfilters.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/gateways.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/istiooperators.install.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/peerauthentications.security.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/proxyconfigs.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/requestauthentications.security.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/serviceentries.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/sidecars.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/telemetries.telemetry.istio.io created
+	Warning: unrecognized format "binary"
+	customresourcedefinition.apiextensions.k8s.io/virtualservices.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/wasmplugins.extensions.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/workloadentries.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/workloadgroups.networking.istio.io created
+	customresourcedefinition.apiextensions.k8s.io/monitoringdashboards.monitoring.kiali.io created
+
+
+Perform Full Istion installation
+	terminal --> kubectl apply -f 2-istio-minikube.yaml
+
+	# result:
+	serviceaccount/istio-egressgateway-service-account created
+	serviceaccount/istio-ingressgateway-service-account created
+	serviceaccount/istio-reader-service-account created
+	serviceaccount/istiod created
+	serviceaccount/istiod-service-account created
+	clusterrole.rbac.authorization.k8s.io/istio-reader-clusterrole-istio-system created
+	clusterrole.rbac.authorization.k8s.io/istio-reader-istio-system created
+	clusterrole.rbac.authorization.k8s.io/istiod-clusterrole-istio-system created
+	clusterrole.rbac.authorization.k8s.io/istiod-gateway-controller-istio-system created
+	clusterrole.rbac.authorization.k8s.io/istiod-istio-system created
+	clusterrolebinding.rbac.authorization.k8s.io/istio-reader-clusterrole-istio-system created
+	clusterrolebinding.rbac.authorization.k8s.io/istio-reader-istio-system created
+	clusterrolebinding.rbac.authorization.k8s.io/istiod-clusterrole-istio-system created
+	clusterrolebinding.rbac.authorization.k8s.io/istiod-gateway-controller-istio-system created
+	clusterrolebinding.rbac.authorization.k8s.io/istiod-istio-system created
+	validatingwebhookconfiguration.admissionregistration.k8s.io/istio-validator-istio-system created
+	envoyfilter.networking.istio.io/stats-filter-1.13 created
+	envoyfilter.networking.istio.io/stats-filter-1.14 created
+	envoyfilter.networking.istio.io/stats-filter-1.15 created
+	envoyfilter.networking.istio.io/tcp-stats-filter-1.13 created
+	envoyfilter.networking.istio.io/tcp-stats-filter-1.14 created
+	envoyfilter.networking.istio.io/tcp-stats-filter-1.15 created
+	configmap/istio created
+	configmap/istio-sidecar-injector created
+	mutatingwebhookconfiguration.admissionregistration.k8s.io/istio-sidecar-injector created
+	deployment.apps/istio-egressgateway created
+	deployment.apps/istio-ingressgateway created
+	deployment.apps/istiod created
+	poddisruptionbudget.policy/istio-egressgateway created
+	poddisruptionbudget.policy/istio-ingressgateway created
+	poddisruptionbudget.policy/istiod created
+	role.rbac.authorization.k8s.io/istio-egressgateway-sds created
+	role.rbac.authorization.k8s.io/istio-ingressgateway-sds created
+	role.rbac.authorization.k8s.io/istiod created
+	role.rbac.authorization.k8s.io/istiod-istio-system created
+	rolebinding.rbac.authorization.k8s.io/istio-egressgateway-sds created
+	rolebinding.rbac.authorization.k8s.io/istio-ingressgateway-sds created
+	rolebinding.rbac.authorization.k8s.io/istiod created
+	rolebinding.rbac.authorization.k8s.io/istiod-istio-system created
+	service/istio-egressgateway created
+	service/istio-ingressgateway created
+	service/istiod created
+	serviceaccount/prometheus created
+	configmap/prometheus created
+	clusterrole.rbac.authorization.k8s.io/prometheus created
+	clusterrolebinding.rbac.authorization.k8s.io/prometheus created
+	service/prometheus created
+	deployment.apps/prometheus created
+	serviceaccount/grafana created
+	configmap/grafana created
+	service/grafana created
+	deployment.apps/grafana created
+	configmap/istio-grafana-dashboards created
+	configmap/istio-services-grafana-dashboards created
+	deployment.apps/jaeger created
+	service/tracing created
+	service/zipkin created
+	service/jaeger-collector created
+	serviceaccount/kiali created
+	configmap/kiali created
+	clusterrole.rbac.authorization.k8s.io/kiali-viewer created
+	clusterrole.rbac.authorization.k8s.io/kiali created
+	clusterrolebinding.rbac.authorization.k8s.io/kiali created
+	service/kiali created
+	deployment.apps/kiali created
+	monitoringdashboard.monitoring.kiali.io/envoy created
+	monitoringdashboard.monitoring.kiali.io/go created
+	monitoringdashboard.monitoring.kiali.io/kiali created
+	monitoringdashboard.monitoring.kiali.io/micrometer-1.0.6-jvm-pool created
+	monitoringdashboard.monitoring.kiali.io/micrometer-1.0.6-jvm created
+	monitoringdashboard.monitoring.kiali.io/micrometer-1.1-jvm created
+	monitoringdashboard.monitoring.kiali.io/microprofile-1.1 created
+	monitoringdashboard.monitoring.kiali.io/microprofile-x.y created
+	monitoringdashboard.monitoring.kiali.io/nodejs created
+	monitoringdashboard.monitoring.kiali.io/quarkus created
+	monitoringdashboard.monitoring.kiali.io/springboot-jvm-pool created
+	monitoringdashboard.monitoring.kiali.io/springboot-jvm created
+	monitoringdashboard.monitoring.kiali.io/springboot-tomcat created
+	monitoringdashboard.monitoring.kiali.io/thorntail created
+	monitoringdashboard.monitoring.kiali.io/tomcat created
+	monitoringdashboard.monitoring.kiali.io/vertx-client created
+	monitoringdashboard.monitoring.kiali.io/vertx-eventbus created
+	monitoringdashboard.monitoring.kiali.io/vertx-jvm created
+	monitoringdashboard.monitoring.kiali.io/vertx-pool created
+	monitoringdashboard.monitoring.kiali.io/vertx-server created
+
+
+Wait 3-4 minutes and list pods in 'istio-system' namepsace. They all need to be in running state
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-g5z5p                1/1     Running   0          2m45s	# grafana runs with prometheus
+	istio-egressgateway-8b8667765-t5wbm     1/1     Running   0          2m46s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-5bf6c88799-ljlg6   1/1     Running   0          2m46s	# ingress gateway (incoming traffic)
+	istiod-7579cff7c5-m9568                 1/1     Running   0          2m46s	# istio deamon
+	jaeger-76d7cfcfdb-fnf7c                 1/1     Running   0          2m44s	# tracing
+	kiali-594fb85dc8-vggtf                  1/1     Running   0          2m44s	# Istio UI
+	prometheus-65bdbcd97f-j2q9w             2/2     Running   0          2m45s	# prometheus runs with grafana
+
+
+
+Create secret for Istio UI
+
+We can change the deafult user and password in the secret
+
+3-kiali-secret.yaml
+-------------------------------------------------
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: kiali
+  namespace: istio-system
+  labels:
+    app: kiali
+data:
+  username: YWRtaW4=			# default username - admin
+  passphrase: YWRtaW4=			# default password - admin
+-------------------------------------------------
+
+Apply the secret
+	terminal --> kubectl apply -f 3-kiali-secret.yaml
+
+	# rresult: secret/kiali created
+	
+
+
+
+
+
+14. Enabling Sidecar Injection
+==============================
+
+
+Sidecar injection is inside 'istiod' pod (as background service).
+
+To set Istio to work on specific namespace we need to label that namespace. If we need Istio to work on the entire cluster we need to label all namepsaces.
+
+Since we will use the default namespace we will label it.
+
+Describe default namespace
+	terminal --> kubectl describe ns default
+
+	# result:
+	Name:         default
+	Labels:       kubernetes.io/metadata.name=default
+	Annotations:  <none>
+	Status:       Active
+
+	No resource quota.
+
+	No LimitRange resource.
+
+
+Label the default namespace
+	terminal --> kubectl label namespace default istio-injection=enabled
+
+	# kubectl				# kubernetes cli
+	# label					# action
+	# namespace				# target object
+	# default				# target object name
+	# istio-injection=enabled			# added label
+
+	# result: namespace/default labeled
+
+
+Confirm namespace labeling
+	terminal --> kubectl describe ns default
+
+	# result:
+	Name:         default
+	Labels:       istio-injection=enabled			# added label
+	              kubernetes.io/metadata.name=default
+	Annotations:  <none>
+	Status:       Active
+
+	No resource quota.
+
+	No LimitRange resource.
+
+
+
+
+
+
+
+15. Visualizing the System with Kiali
+=====================================
+
+Deploy provided full stack application
+	terminal --> kubectl apply -f 4-application-full-stack.yaml
+
+	# result:
+	deployment.apps/position-simulator created
+	deployment.apps/position-tracker created
+	deployment.apps/api-gateway created
+	deployment.apps/webapp created
+	deployment.apps/vehicle-telemetry created
+	deployment.apps/staff-service created
+	deployment.apps/photo-service created
+	service/fleetman-webapp created
+	service/fleetman-position-tracker created
+	service/fleetman-api-gateway created
+	service/fleetman-vehicle-telemetry created
+	service/fleetman-staff-service created
+	service/fleetman-photo-service created
+	serviceentry.networking.istio.io/fleetman-driver-monitoring created
+	virtualservice.networking.istio.io/fleetman-driver-monitoring created
+	destinationrule.networking.istio.io/fleetman-driver-monitoring created
+
+
+
+We can watch the initialization process of the application
+	terminal --> kubectl get pods -w
+
+	# result:
+	NAME                                  READY   STATUS            RESTARTS   AGE
+	api-gateway-545bd8467-f25rh           0/2     PodInitializing   0          30s
+	photo-service-7964f66b46-4kcws        0/2     PodInitializing   0          30s
+	position-simulator-57b958fcdf-z6mpz   2/2     Running           0          30s
+	position-tracker-6488766d87-226j6     2/2     Running           0          30s
+	staff-service-7fd88cfc68-bz9l7        2/2     Running           0          30s
+	vehicle-telemetry-7bdb8cdc75-pn84q    0/2     PodInitializing   0          30s
+	webapp-897875fc8-sg22r                0/2     PodInitializing   0          30s
+
+
+We can see that every pod has 2 containers. Wait untill all pods are in running state.
+
+Set the following workaround:
+	terminal --> kubectl port-forward svc/fleetman-webapp 30080:80
+
+Open the application on http://127.0.0.1:30080/
+
+
+We have few vehicles tracked with this system. The application has a bug that we have to find and fix. The problem is that the application is slow and do not work as expected.
+
+
+
+
+We want access Istion UI.
+
+Find the minikube IP (Optional)
+	terminal --> minikube IP
+
+	# result: 192.168.49.2
+
+List Istio service
+	terminal --> kubectl get svc -n istio-system
+
+	# result:
+	NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      AGE
+grafana                NodePort    10.100.52.189    <none>        3000:31002/TCP                                                               53m
+istio-egressgateway    ClusterIP   10.107.3.58      <none>        80/TCP,443/TCP                                                               53m
+istio-ingressgateway   NodePort    10.103.190.71    <none>        15021:31978/TCP,80:31380/TCP,443:30953/TCP,31400:31962/TCP,15443:30777/TCP   53m
+istiod                 ClusterIP   10.102.209.145   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP                                        53m
+jaeger-collector       ClusterIP   10.109.231.182   <none>        14268/TCP,14250/TCP                                                          53m
+kiali                  NodePort    10.103.37.33     <none>        20001:31000/TCP,9090:32553/TCP      # target                                       53m
+prometheus             ClusterIP   10.108.113.0     <none>        9090/TCP                                                                     53m
+tracing                NodePort    10.102.39.9      <none>        80:31001/TCP                                                                 53m
+zipkin                 ClusterIP   10.96.202.75     <none>        9411/TCP                                                                     53m
+
+
+Set port forewarding for Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+
+Access the Istion UI on Istion IP and port of the kiali service - http://localhost:20001
+
+On Overview page we can see that in the istio-system namespace we have 1 application that is 'Degraded'.
+
+On 'Graph' page choose 'default' namespace from the dropdown menu, 'Versioned app grapf' from the grapf dropdown menu and check the connectuons between our pods and services.
+
+We can visualize only services only by choosing 'Service grapf' from the dropdown menu.
+
+We can see that we have a problem in the communication between fleetman-staff-service and fleetman-driver-monitoring.
+
+We can see object descriptions by pressing the 'Legend' button at the bottom. We can see that the Service Entry (external API service) of the fleetman-driver-monitoring is problematic.
+
+
+
+
+
+
+16. Finding Performance Problems
+================================
+
+In the Grapf/Service grapf dropdown menu we can set view for requests per second, Response Time or any other useful metrics.
+
+We will start Jaeger and find the exact service connection details.
+
+Start jaeger (tracing) by port forwarding the service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+
+We can now access tracing on http://localhost:8080
+
+In the Service dropdown field choose 'staff-service.default' and click on 'Find traces' details for this service will be displayed. 
+
+We can see histogram with time details (seconds) for each request. We can see that the communication between the services we are looking at is so slow that this should be the problem. In this situation the best solution is to set a cirquit braker that prevents chain delays in other sevices (knock on effect or cascading falure) from a single service.
+
+If this is the real life situation in the middle of the night and this is just 'nice to have' feature we want to have the possibility to just turn this feature off and not disturb the rest of the system while its fixed.
+
+In this case the failing service is calling not working/slow working external API service. This mean that we cannot stop a pod to prevent the requests. We need to reconfigure the calling service to stop sending requests to the external API server. WWe can achieve that true configring the istio proxy container for this service to return specific response. For example we the proxy can return 400 (error) or 200 (ok) and not even make the call to the external API. It can sent the request but if the response is taking more than some configured time (example: 10 seconds) the connection will be terminated. Another option is to se a timeout and prevent chain delay across other services.
+
+Set a timeout in the service we have problem with
+-------------------------------------------------
+
+In file 4-application-full-stack.yaml start on 270 line we have this external API service configuration.
+
+
+4-application-full-stack.yaml
+-------------------------------------------------
+---
+# See case #23 - this is a legacy service that we're integrating with
+# line 270
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: fleetman-driver-monitoring
+spec:
+  hosts:
+  - 2oujlno5e4.execute-api.us-east-1.amazonaws.com
+  http:
+  - match:
+    - port: 80
+    timeout: 1s                        # added timeout 1s
+    route:
+    - destination:
+        host: 2oujlno5e4.execute-api.us-east-1.amazonaws.com
+        port:
+          number: 443
+-------------------------------------------------
+
+Reapply the application
+	terminal --> kubectl apply -f 4-application-full-stack.yaml
+
+	# result: virtualservice.networking.istio.io/fleetman-driver-monitoring configured
+
+
+After about a 1-2 minutes we can refresh the application and see improvement- http://localhost:30080/
+
+We can see the improved communication on jaeger histogram - http://localhost:8080/
+	- All requests are make for maximum 1 seond and not 10 as was before the change.
+
+
