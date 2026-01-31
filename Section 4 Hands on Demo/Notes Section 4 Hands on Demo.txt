@@ -90,6 +90,11 @@ Start on clean minikube setup
 * Done! kubectl is now configured to use "minikube" cluster and "default" namespace by default
 
 
+Wait 2-3 minutes and confirm resources alocated
+	terminal --> docker inspect minikube | grep -i memory
+	terminal --> docker inspect minikube | grep -i cpu
+
+
 INSTALL ISTIO
 -------------
 Navigate to resource folder
@@ -465,5 +470,11 @@ After about a 1-2 minutes we can refresh the application and see improvement- ht
 
 We can see the improved communication on jaeger histogram - http://localhost:8080/
 	- All requests are make for maximum 1 seond and not 10 as was before the change.
+
+
+Stop the Minikube for the next session
+	terminal --> minikube stop
+
+
 
 
