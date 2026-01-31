@@ -1,0 +1,272 @@
+Section 5 Introducing Envoy
+===========================
+
+Section content:
+----------------
+
+17. Introducing Envoy - The Data Plane
+18. The next lecture is optional!
+19. Going Deeper into Envoy (Optional Video)
+
+
+
+17. Introducing Envoy - The Data Plane
+======================================
+
+Istio Proxy containers can be called as 'I have a problem with my Sidecar', 'I have a problem with my Proxy' or 'I have a problem with Envoy'. The proxies are collectively called the "Data Plane" in istio.
+
+Important feature in Istio are comming from Envoy. Istio is framework (abstraction layer) using Envoy features. Istio tranform Kuberentes YAML (via CRDs) into Envoy configuration automatically and assure usage in Kubernetes cluster.
+
+Envoy is Proxy for cluster based applications - https://www.envoyproxy.io/
+
+Envoy Features:
+
+Out of process architecture
+---------------------------
+Envoy is a self contained, high performance server with a small memory footprint. It runs alongside any application language or framework.
+
+
+Advanced load balancing
+-----------------------
+Envoy supports advanced load balancing features including automatic retries, circuit breaking, global rate limiting, request shadowing, zone local load balancing, etc.
+
+
+Observability
+-------------
+Deep observability of L7 traffic, native support for distributed tracing, and wire-level observability of MongoDB, DynamoDB, and more.
+
+
+HTTP/2 and gRPC support
+-----------------------
+Envoy has first class support for HTTP/2 and gRPC for both incoming and outgoing connections. It is a transparent HTTP/1.1 to HTTP/2 proxy.
+
+
+APIs for configuration management
+---------------------------------
+Envoy provides robust APIs for dynamically managing its configuration.
+
+
+
+
+
+
+18. The next lecture is optional!
+=================================
+In the next lecture, I look in a bit more detail at Envoy. I promise, you REALLY don't need to understand Envoy in any detail - at least until you get very advanced with Istio.
+
+So you can safely skip the next video, I've only put this in if you're really curious about what Envoy is doing!
+
+
+
+
+19. Going Deeper into Envoy (Optional Video)
+============================================
+
+Some of Envoy features are 
+	- gather telemetry from Proxies
+	- implement policies using proxies
+	- traffic management using proxies
+		- stting up canary releases
+		- tests
+		- red/black deployment
+		- deploy tests software in live production environmant
+
+
+We weill go briefly over traffic management example.
+
+Requirements: Set up a component that can receive a standard http request.
+	- If the request beggins "/google", send rhe request to Google
+	- If the request beggins "/vpp", send the request to VirtualPairProgrammers.com
+
+We can check the picture diagram in the session folder - Envoy structure.png
+
+
+Set your shell to point to minikube's docker-daemon
+Prepare environment variables
+	terminal --> export DOCKER_TLS_VERIFY = "1"
+	terminal --> export DOCKER_HOST = "tcp://127.0.0.1:60696"
+	terminal --> export DOCKER_CERT_PATH = "C:\Users\balab\.minikube\certs"
+	terminal --> export MINIKUBE_ACTIVE_DOCKERD = "minikube"
+
+To point your shell to minikube's docker-daemon, run:
+	terminal --> & minikube -p minikube docker-env --shell powershell | Invoke-Expression
+
+List all images inside minikube cluster
+	terminal --> docker image ps
+
+# expected result:
+IMAGE                                                    ID             DISK USAGE   CONTENT SIZE   EXTRA
+gcr.io/k8s-minikube/storage-provisioner:v5               6e38f40d628d       31.5MB             0B    U
+grafana/grafana:7.2.1                                    2f17bd84b75d        180MB             0B    U
+istio/pilot:1.15.1                                       cad056cfa767        191MB             0B    U
+istio/proxyv2:1.15.1                                     ea4ebe23a9af        245MB             0B    U
+jaegertracing/all-in-one:1.20                            84b5c715abd0       45.7MB             0B    U
+jimmidyson/configmap-reload:v0.4.0                       37e6075b1356       10.7MB             0B    U
+prom/prometheus:v2.21.0                                  cdfc440228d0        168MB             0B    U
+quay.io/kiali/kiali:v1.23                                6b8acec549b2        168MB             0B    U
+registry.k8s.io/coredns/coredns:v1.13.1                  aa5e3ebc0dfe       78.1MB             0B    U
+registry.k8s.io/etcd:3.6.6-0                             0a108f718956       62.5MB             0B    U
+registry.k8s.io/kube-apiserver:v1.35.0                   5c6acd67e9cd       89.8MB             0B    U
+registry.k8s.io/kube-controller-manager:v1.35.0          2c9a4b058bd7       75.8MB             0B    U
+registry.k8s.io/kube-proxy:v1.35.0                       32652ff1bbe6       70.7MB             0B    U
+registry.k8s.io/kube-scheduler:v1.35.0                   550794e3b12a       51.7MB             0B    U
+registry.k8s.io/pause:3.10.1                             cd073f4c5f6a        736kB             0B    U
+richardchesterwood/istio-fleetman-api-gateway:5          40da1feaccca        132MB             0B    U
+richardchesterwood/istio-fleetman-photo-service:5        db578c5ba6f1        131MB             0B    U
+richardchesterwood/istio-fleetman-position-simulator:5   9a14f957be6c        301MB             0B    U
+richardchesterwood/istio-fleetman-position-tracker:5     c0fea28425c4        305MB             0B    U
+richardchesterwood/istio-fleetman-staff-service:5        38871e608779        305MB             0B    U
+richardchesterwood/istio-fleetman-vehicle-telemetry:5    034f793ab3e8        305MB             0B    U
+richardchesterwood/istio-fleetman-webapp-angular:5       74d4ea3dbff3       19.7MB             0B    U
+
+
+
+
+Envoy demo files are in folder 'envoy_demo'
+	- config.yaml
+	- Dockerfile
+
+File config.yaml is NOT PRODUCTION ready envoy configuration.
+
+config.yaml
+-------------------------------------------------
+admin:                                      # set admin to gather statistics
+  access_log_path: /tmp/admin_access.log    # set admin access log
+  address:
+    socket_address:
+      protocol: TCP
+      address: 0.0.0.0                      # set admin address
+      port_value: 9901                      # set admin port
+
+static_resources:
+  listeners:                                # set listeners
+  - name: listener_0
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 10000                   # set listener port that the requests will comming on
+    filter_chains:                          # set filter chains - configs in filter_chain_matchers
+    - filters:                              # set virtual hosts
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:                             # set route configs
+            name: google_and_vpp_split_routing      # first route config
+            virtual_hosts:
+            - name: backend
+              domains: ["*"]
+              routes:
+              - match:                              # set first route match
+                  prefix: "/google"                 # set route prefix - if request is coming with this prefix
+                route:
+                  cluster: service_google           # set route cluster
+                  prefix_rewrite: "/"               # remove prefix bofore calling google
+                  host_rewrite_literal: "www.google.com"          # rewrite host header (updated field name for v3)
+              - match:                                    # set second route match
+                  prefix: "/vpp"                          # set route prefix - if request is coming with this prefix
+                route:
+                  cluster: service_vpp                     # set route cluster
+                  prefix_rewrite: "/"                       # remove prefix before calling vpp
+                  host_rewrite_literal: "www.virtualpairprogrammers.com"            # rewrite host header (updated field name for v3)
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:                                       # set envoy cluster - we can set multiple pods with load balancing logic/rules
+  - name: service_google
+    connect_timeout: 10s                          # set connect timeout
+    type: STRICT_DNS
+    # Comment out the following line to test on v6 networks
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service_google
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: www.google.com
+                port_value: 443
+    transport_socket:                                 # Replaced old tls_context with modern transport_socket (required in v3+)
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: www.google.com
+
+  - name: service_vpp
+    connect_timeout: 10s                              # set connect timeout
+    type: LOGICAL_DNS
+    # Comment out the following line to test on v6 networks
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service_vpp
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: www.virtualpairprogrammers.com
+                port_value: 443
+    transport_socket:                   # Replaced old tls_context with modern transport_socket (required in v3+)
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: www.virtualpairprogrammers.com
+-------------------------------------------------
+
+In our Kubernetes cluster Istio (via Pilots) is handling the envoy configuration but not here.
+
+
+Dockerfile
+-------------------------------------------------
+FROM envoyproxy/envoy:v1.37.0				# set the latest stable image version
+RUN apt-get update
+COPY config.yaml /etc/envoy.yaml
+CMD /usr/local/bin/envoy -c /etc/envoy.yaml
+-------------------------------------------------
+
+We can build our own image with the Dockerfile.
+
+
+The better solution is to use already built image fomr DockerHub. One of the most used images is: - https://hub.docker.com/r/envoyproxy/envoy
+
+
+Create the image
+	terminal --> docker image build -t my-istio-demo .
+
+Run the image
+	terminal --> docker run -d -p 10000:10000 -p 9901:9901 my-istio-demo
+
+We can test the listener port 
+	- http://localhost:10000/google
+		- We should get Google page
+	
+	- http://localhost:10000/vpp		
+		- We should get vpp page without images
+
+
+We can now access admin on http://localhost:9901/
+	- We can go to 'stats' and see that envoy is collecting metrics (telemetry) - http://localhost:9901/stats
+	- We can look over the metrics and visualize what we need to look over.
+
+This is the principle Envoy working on.
+
+This was simple demo on Envoy. In the next session we will continue using Istio.
+
+
+
+
+
+
+
+
+
+
+
+
+

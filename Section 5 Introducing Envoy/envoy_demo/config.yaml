@@ -1,0 +1,87 @@
+admin:                                      # set admin to gather statistics
+  access_log_path: /tmp/admin_access.log    # set admin access log
+  address:
+    socket_address:
+      protocol: TCP
+      address: 0.0.0.0                      # set admin address
+      port_value: 9901                      # set admin port
+
+static_resources:
+  listeners:                                # set listeners
+  - name: listener_0
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 10000                   # set listener port that the requests will comming on
+    filter_chains:                          # set filter chains - configs in filter_chain_matchers
+    - filters:                              # set virtual hosts
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:                             # set route configs
+            name: google_and_vpp_split_routing      # first route config
+            virtual_hosts:
+            - name: backend
+              domains: ["*"]
+              routes:
+              - match:                              # set first route match
+                  prefix: "/google"                 # set route prefix - if request is coming with this prefix
+                route:
+                  cluster: service_google           # set route cluster
+                  prefix_rewrite: "/"               # remove prefix bofore calling google
+                  host_rewrite_literal: "www.google.com"          # rewrite host header (updated field name for v3)
+              - match:                                    # set second route match
+                  prefix: "/vpp"                          # set route prefix - if request is coming with this prefix
+                route:
+                  cluster: service_vpp                     # set route cluster
+                  prefix_rewrite: "/"                       # remove prefix before calling vpp
+                  host_rewrite_literal: "www.virtualpairprogrammers.com"            # rewrite host header (updated field name for v3)
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:                                       # set envoy cluster - we can set multiple pods with load balancing logic/rules
+  - name: service_google
+    connect_timeout: 10s                          # set connect timeout
+    type: STRICT_DNS
+    # Comment out the following line to test on v6 networks
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service_google
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: www.google.com
+                port_value: 443
+    transport_socket:                                 # Replaced old tls_context with modern transport_socket (required in v3+)
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: www.google.com
+
+  - name: service_vpp
+    connect_timeout: 10s                              # set connect timeout
+    type: LOGICAL_DNS
+    # Comment out the following line to test on v6 networks
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service_vpp
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: www.virtualpairprogrammers.com
+                port_value: 443
+    transport_socket:                   # Replaced old tls_context with modern transport_socket (required in v3+)
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: www.virtualpairprogrammers.com
