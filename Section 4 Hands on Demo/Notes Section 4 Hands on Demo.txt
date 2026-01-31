@@ -478,3 +478,54 @@ Stop the Minikube for the next session
 
 
 
+
+SHORT SETUP
+===========
+
+Minikube cluster should be with installed Istio and application from the last session.
+
+Start minikube cluster if it is already prepared
+	terminal --> minikube start
+
+If the cluster is clean we can use the instruction below to prepare the setup.
+
+INSTALL ISTIO AND APPLICATION ON A CLUSTER
+----------------------------------------------------------------------------------------
+# We should have installed atleast Minikube (3 Installing a local Kubernetes environment) or have a running cluster
+Start cluster and application with Minikube
+	Create cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Deploy Instio
+		terminal --> cd warmup-exercise
+		terminal --> kubectl apply -f .\1-istio-init.yaml
+		terminal --> kubectl apply -f 2-istio-minikube.yaml
+		terminal --> kubectl get pods -n istio-system -w	# wait until all pods are running
+		terminal --> kubectl apply -f 3-kiali-secret.yaml
+
+
+	Deploy application
+		terminal --> kubectl label namespace default istio-injection=enabled  # label working namespace as Istio serviced
+		terminal --> kubectl apply -f 4-application-full-stack.yaml	      # Deploy the application in the working ns
+
+
+Expose 3 Istio features by port forwarding:
+	Expose the installed application with port forward
+		terminal --> kubectl port-forward svc/fleetman-webapp 30080:80
+		
+	Access the application on http://127.0.0.1:30080/
+
+	Expose Istio Kiali UI
+		terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the Istion UI on http://localhost:20001
+
+
+	Expose jaeger (tracing)
+		terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access tracing on http://localhost:8080
+----------------------------------------------------------------------------------------
+
+
+
