@@ -1,0 +1,567 @@
+Section 7 Traffic Management
+============================
+
+Section content:
+----------------
+28. Introducing Canaries
+29. Canaries with Replicas
+30. Version Grouping
+31. Elegant Canaries and Staged Releases
+32. What is an Istio VirtualService?
+33. VirtualService Configuration in yaml
+34. What is an Istio DestinationRule?
+
+
+
+
+PREREQUISITES
+-------------
+
+Optional
+--------
+Set alias for kubectl in bash 
+	1. Add the alias: bash --> echo "alias k='kubectl'" >> ~/.bashrc
+	2. Apply it: bash --> source ~/.bashrc
+
+Start the cluster
+	terminal --> minikube start
+
+
+IF WE DONT HAVE RUNNING CLUSTER WITH INSTALLED ISTIO AND EXAMPLE APPLICATION WE NEED TO EXECUTE THE COMMANDS AS FOOLOW:
+---------------------------------------------------------------------------------------
+We will use resources in folder '1-Telemetry'
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-label-default-namespace.yaml
+	- 5-application-no-istio.yaml
+
+Navigate to the resource folder and setup the scenario:
+	Delete the old Minikube cluster
+		terminal --> minikube delete
+
+	Create new Minikube cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+	Test the connection
+		terminal --> kubectl get nodes
+
+		# result:
+		NAME       STATUS   ROLES           AGE   VERSION
+		minikube   Ready    control-plane   10s   v1.35.0
+
+
+	Deply provided resources
+		terminal --> cd 1-Telemetry
+		
+ISNTALL LATEST ISTIO - for Widnows
+--------------------
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH=$PWD/bin:$PATH
+
+Install Istio
+	bash --> istioctl install --set profile=demo -y
+
+Enable sidecar injection on the working namespace (default)
+	bash --> kubectl label namespace default istio-injection=enabled
+
+Verify installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kj4pd     1/1     Running   0          76s
+	istio-ingressgateway-6f868bc4f7-qkmc6   1/1     Running   0          76s
+	istiod-77cb77f5b8-7clw4                 1/1     Running   0          95s
+
+	# all pods must be running
+
+APPLY PROVIDED RESOURCES
+------------------------
+Apply the provided init file - this will modify the installed Istio installation to work with the provided resources
+	bash -->  kubectl apply -f 1-istio-init.yaml
+
+Apply the CRD 2-istio-minikube.yaml
+	bash --> kubectl apply -f 2-istio-minikube.yaml
+
+Test installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   0          5m46s	# grafana runs with prometheus
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   0          5m47s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   0          5m47s	# ingress gateway (incoming traffic)
+	istiod-65cdd474f7-l4wmp                1/1     Running   0          5m47s	# istio deamon
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   0          5m46s	# Jaeger Traces service
+	kiali-594fb85dc8-s68bb                 1/1     Running   0          5m45s	# Kiali UI service
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   0          5m46s	# prometheus works with grafana
+
+
+Apply the CRD 3-kiali-secret.yaml to prevent login requirements to Kiali UI every time
+	bash --> kubectl apply -f 3-kiali-secret.yaml
+
+	# result: secret/kiali created
+
+Apply the CRD 4-label-default-namespace.yaml to label default namespace to be Istio enabled. 
+	bash --> kubectl apply -f 4-label-default-namespace.yaml
+	
+	# result: namespace/default configured
+
+	Confirm labeling
+		bash --> kubectl describe ns default
+
+		# result: Labels:       istio-injection=enabled
+
+	# This will add the additional proxy container is every pod application in the 'default' namespace.
+	# It is important to apply this label to the working namespace before start deploying the application
+
+Deploy the application
+	bash --> kubectl apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator created
+	deployment.apps/position-tracker created
+	deployment.apps/api-gateway created
+	deployment.apps/webapp created
+	deployment.apps/vehicle-telemetry created
+	deployment.apps/staff-service created
+	service/fleetman-webapp created
+	service/fleetman-position-tracker created
+	service/fleetman-api-gateway created
+	service/fleetman-vehicle-telemetry created
+	service/fleetman-staff-service created
+
+List pods to confirm that every pod has 2 containers - app + proxy (istio)
+	terminal --> kubectl get pods
+
+	# result:
+	NAME                                  READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-wxc76          2/2     Running   0          3m14s
+	position-simulator-8449f4c5cc-pnkxd   2/2     Running   0          3m14s
+	position-tracker-676dd958cf-2v9b5     2/2     Running   0          3m14s
+	staff-service-59b8695469-9sfxm        2/2     Running   0          3m14s
+	vehicle-telemetry-64bb8b49-kfv6b      2/2     Running   0          3m14s
+	webapp-cc469458d-rsnpl                2/2     Running   0          3m14s
+
+We can see that all pods has 2 contaires in them. This means that proxy (Istio) container is successfully injected.
+If we forget to label the namespace the proxy containers (sidecar) will not be deployed in the pods. 
+
+Expose the installed application with port forward
+	terminal --> kubectl port-forward svc/fleetman-webapp 30080:80
+		
+	Access the application on http://127.0.0.1:30080/
+
+
+TELEMETRY REQUIREMENTS
+----------------------
+1. Running (Envoy Sidecar) Proxy in each pod we wnat to monitor
+2. Istion control plane need to be running (ie. istiod{istiodaemon}, kiali{UI}, jaeger{tracer}, grafana{present data})
+3. We DON"T need any specific Istio YAML configuration (NO need for VirtualServices, Gateways, etc.)
+
+Confirm requirements
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS      AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   1 (11h ago)   12h
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   1 (11h ago)   12h
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   1 (11h ago)   12h
+	istiod-65cdd474f7-l4wmp                1/1     Running   1 (11h ago)   12h
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   1 (11h ago)   12h
+	kiali-594fb85dc8-s68bb                 1/1     Running   1 (11h ago)   12h
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   2 (11h ago)   12h
+
+Create/expose Kiali service
+	terminal --> kubectl expose deployment kiali -n istio-system --type=NodePort --port=20001 --target-port=20001
+
+	# result: service/kiali exposed
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP      	# This is the created Kiali UI service                                                        
+
+Expose Istio Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the Istion UI on http://localhost:20001
+
+Check Jaeger and Zipkin services existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP         # Jaeger UI service                                                           
+
+Expose Jaeger (tracing) service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access Jaeger on http://localhost:8080
+---------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+28. Introducing Canaries
+========================
+
+We need to change the image used in our test application from canary deployment introduction:
+
+In file '5-application-no-istio.yaml' line 130
+
+5-application-no-istio.yaml
+-------------------------------------------------
+...
+    spec:
+      containers:
+      - name: staff-service
+        image: richardchesterwood/istio-fleetman-staff-service:6-placeholder		# change to 6-placeholder
+        env:
+...
+-------------------------------------------------
+
+Apply the changes
+	terminal --> k apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator unchanged
+	deployment.apps/position-tracker unchanged
+	deployment.apps/api-gateway unchanged
+	deployment.apps/webapp unchanged
+	deployment.apps/vehicle-telemetry unchanged
+	deployment.apps/staff-service configured		# changed
+	service/fleetman-webapp unchanged
+	service/fleetman-position-tracker unchanged
+	service/fleetman-api-gateway unchanged
+	service/fleetman-vehicle-telemetry unchanged
+	service/fleetman-staff-service unchanged
+
+
+Confirm pod reinitialization
+	termiminal --> k get pods
+	NAME                                  READY   STATUS    RESTARTS      AGE
+	api-gateway-64d5b6b4cb-wxc76          2/2     Running   4 (32h ago)   45h
+	position-simulator-8449f4c5cc-pnkxd   2/2     Running   4 (32h ago)   45h
+	position-tracker-676dd958cf-2v9b5     2/2     Running   4 (32h ago)   45h
+	staff-service-9c9c77ddf-88l4q         2/2     Running   0             72s	# should be in running state
+	vehicle-telemetry-64bb8b49-kfv6b      2/2     Running   4 (32h ago)   45h
+	webapp-cc469458d-rsnpl                2/2     Running   5 (9h ago)    45h
+
+
+
+Access the application on http://127.0.0.1:30080/
+
+We can see that the drivers don't have profile pictures.
+
+Scenario:
+---------
+We need to implement staff profile pictures with Canary release strategy.
+
+What is Canary release?
+	- Deploy a new version of a software component (for us - new image)
+	- But only make that new image 'live' for a procentage of the time (
+		- not procentage of users but time !!!
+		- the new version will be running alogside with the old one with small procentage of requests
+	- Most of the time the old (working) version is the one being used
+
+
+
+
+
+29. Canaries with Replicas
+==========================
+
+Scenario:
+---------
+We need to implement staff profile pictures with Canary release strategy.
+
+
+This example is for poor canary implementation called "Bodge Canary" in the course.
+
+We have client side that send request to our backend service. Behind our backend service we have 2 pods with the old version and one pod with the new version (different image providing driver's picture). We will configure our application manifest via 'labels' to route 30% of the requests to the new app version (one pod).
+
+The exact architecture is presented on picture 'Bodge-Canary.png' in the session resource folder.
+
+In the deployment named 'name: staff-service' with pod template with label 'app: staff-service'. We have service that targets this deployment via specified. In file 5-application-no-istio.yaml from line 113 to line 136.
+
+We will create duplicate deployment and set different name and pod label as follow. 
+	1. Copy the existing deployment (line 113-136)
+	2. Paste it below the existing one
+	3. Change the name of the deployment to 'staff-service-risky-version' and same label - targeted by the service
+	4. Set the used image tag in the pod template to '6'
+	5. Set replicas in the old deployment to 2 - line 122
+
+5-application-no-istio.yaml
+-------------------------------------------------
+...
+      app: staff-service
+  replicas: 2                                 # set 2 replicas on the old deployment - line 122
+  template: # template for the pods
+...
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: staff-service-risky-version           # changed deployment name
+spec:
+  selector:
+    matchLabels:
+      app: staff-service                      # same label
+  replicas: 1
+  template: # template for the pods
+    metadata:
+      labels:
+        app: staff-service
+    spec:
+      containers:
+      - name: staff-service
+        image: richardchesterwood/istio-fleetman-staff-service:6      # set tag '6'
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: production-microservice
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+-------------------------------------------------
+
+This changes will form the target setup to perform canary release - 30% of the requests should be routed to the new app version.
+
+Apply changes
+	termiinal --> k apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator unchanged
+	deployment.apps/position-tracker unchanged
+	deployment.apps/api-gateway unchanged
+	deployment.apps/webapp unchanged
+	deployment.apps/vehicle-telemetry unchanged
+	deployment.apps/staff-service configured			# old deployment configured
+	deployment.apps/staff-service-risky-version created		# new deployment created
+	service/fleetman-webapp unchanged
+	service/fleetman-position-tracker unchanged
+	service/fleetman-api-gateway unchanged
+	service/fleetman-vehicle-telemetry unchanged
+	service/fleetman-staff-service unchanged
+
+
+Confirm deployment configuration
+	terminal --> k get pods
+
+	# result:
+	NAME                                          READY   STATUS    RESTARTS      AGE
+	api-gateway-64d5b6b4cb-wxc76                  2/2     Running   4 (33h ago)   45h
+	position-simulator-8449f4c5cc-pnkxd           2/2     Running   4 (33h ago)   45h
+	position-tracker-676dd958cf-2v9b5             2/2     Running   4 (33h ago)   45h
+	staff-service-9c9c77ddf-2cprs                 2/2     Running   0             100s	# the old deployment pod 1
+	staff-service-9c9c77ddf-88l4q                 2/2     Running   0             43m	# the old deployment pod 2
+	staff-service-risky-version-9c9c77ddf-rq8wj   2/2     Running   0             100s	# the new deployment
+	vehicle-telemetry-64bb8b49-kfv6b              2/2     Running   4 (33h ago)   45h
+	webapp-cc469458d-rsnpl                        2/2     Running   5 (9h ago)    45h
+
+
+Test the canary releas with the client application on http://127.0.0.1:30080/
+	- Every third click on different deriver should present us a picture of it
+
+
+
+
+
+
+
+
+30. Version Grouping
+====================
+
+In Kiali UI (http://localhost:20001/) / Versioned app graph we can see the setup we created in the last session - "Bodge Canary"
+	- 1 service - staff-service infornt 3 pods as follow
+	- 2 pods with old app version (drivers without pictures)
+	- 1 pods with new app version (drivers with pictures)
+
+We will set additional labels to the deployments pod template 
+	- Old deployment pod template label - 'version: safe'
+	- New deployment pod template label - 'version: riskuy' 
+
+
+5-application-no-istio.yaml
+-------------------------------------------------
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: staff-service
+spec:
+  selector:
+    matchLabels:
+      app: staff-service
+  replicas: 1
+  template: # template for the pods
+    metadata:
+      labels:
+        app: staff-service
+        version: safe                  # added label
+    spec:
+      containers:
+      - name: staff-service
+        image: richardchesterwood/istio-fleetman-staff-service:6-placeholder
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: production-microservice
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: staff-service-risky-version
+spec:
+  selector:
+    matchLabels:
+      app: staff-service
+  replicas: 1
+  template: # template for the pods
+    metadata:
+      labels:
+        app: staff-service
+        version: risky                  # added label
+    spec:
+      containers:
+      - name: staff-service
+        image: richardchesterwood/istio-fleetman-staff-service:6
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: production-microservice
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+---
+-------------------------------------------------
+
+Apply changes
+	termiinal --> k apply -f 5-application-no-istio.yaml
+
+The labels will be presented on Kiali UI - http://localhost:20001/
+
+Presented view without additional labels in picture 'Kiali UI - Bodge-Canary.png'.
+
+
+
+
+
+
+
+31. Elegant Canaries and Staged Releases
+========================================
+
+Prerequisites - change the old version deployment to 1 replica
+5-application-no-istio.yaml
+-------------------------------------------------
+...
+      app: staff-service
+  replicas: 2                                 # set 1 replicas on the old deployment - line 122
+  template: # template for the pods
+...
+-------------------------------------------------
+
+Apply changes
+	termiinal --> k apply -f 5-application-no-istio.yaml
+
+Now we have 50%/50% traffic for each version - Every second click should present driver with prfile picture. We can test on the client page - http://127.0.0.1:30080/.
+
+Scenario: 
+---------
+We will configure 10% of the request to go to the new app version.
+
+Configure Service weigh rule
+----------------------------
+
+Find 'fleetman-staff-service' in Kiali UI / Services - http://localhost:20001/ 
+	- On top right menu click on Actions/Create Weighted Routing
+	- Move the slider to 10% for the risky version
+	- Create
+
+On the bottom of the service Details page we can see that new virtual service and destination rule are created.
+
+We can test the setup on the client page - http://127.0.0.1:30080/.
+
+We can set the setup with curl command in bash
+	bash --> while true; do curl http://127.0.0.1:30080/api/vehicles/driver/City%20Truck; echo; sleep 0.5; done
+
+	We will see about 10% of the requests return image name.
+
+
+Change the precentage to 50%/50% 
+	- Find 'fleetman-staff-service' in Kiali UI / Services - http://localhost:20001/ 
+	- On top right menu click on Actions/Update Weighted Routing
+	- Move the slider to 50% for the risky version
+	- Update
+
+
+Test the setup with curl command in bash or in the Kiali UI
+	bash --> while true; do curl http://127.0.0.1:30080/api/vehicles/driver/City%20Truck; echo; sleep 0.5; done
+
+	We will see about 50% of the requests return image name.
+
+Change the precentage to 100% of the new version
+	- Find 'fleetman-staff-service' in Kiali UI / Services - http://localhost:20001/ 
+	- On top right menu click on Actions/Update Weighted Routing
+	- Move the slider to 100% for the risky version
+	- Update
+
+Test the setup with curl command in bash or in the Kiali UI
+	bash --> while true; do curl http://127.0.0.1:30080/api/vehicles/driver/City%20Truck; echo; sleep 0.5; done
+
+	We will see about 100% of the requests return image name.
+
+
+
+
+
+
+
+32. What is an Istio VirtualService?
+====================================
+
+
+
+33. VirtualService Configuration in yaml
+========================================
+
+
+
+34. What is an Istio DestinationRule?
+=====================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
