@@ -380,10 +380,51 @@ List destination rules to confirm deletion
 
 
 
+
 23. Distributed Tracing Overview
 ================================
 
-We will go over Jaeger which is distributed tracing framework. 
+We will go over Jaeger which is distributed tracing framework that is integrated itno Istio using its telemetry data. It allows us to track a single request that we send into the system or we can get a full graph of the chain of events that the request caused. We can get detailed timing data and get detailed data information about exactly where that request went.
+
+There are a lot of tracing frameworks that can be found on https://opentracing.io/
+Two of them are supported and build in Istio:
+	- Jaeger - created by Uber
+	- Zipkin - created by Twitter
+
+
+Check Jaeger and Zipkin services existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      AGE
+grafana                NodePort    10.102.89.82     <none>        3000:31002/TCP                                                               12h
+istio-egressgateway    ClusterIP   10.105.212.49    <none>        80/TCP,443/TCP                                                               12h
+istio-ingressgateway   NodePort    10.100.233.83    <none>        15021:32300/TCP,80:31380/TCP,443:32589/TCP,31400:31000/TCP,15443:31988/TCP   12h
+istiod                 ClusterIP   10.110.254.210   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP                                        12h
+jaeger-collector       ClusterIP   10.103.147.126   <none>        14268/TCP,14250/TCP                                                          12h
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP      	                                                       14s
+prometheus             ClusterIP   10.100.141.126   <none>        9090/TCP                                                                     12h
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP         # Jaeger UI service                                                          12h
+zipkin                 ClusterIP   10.99.133.244    <none>        9411/TCP 	       # Zipkin UI service   
+
+
+Expose Jaeger (tracing) service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access Jaeger on http://localhost:8080
+
+
+In Jaeger UI we can visualize events by choosing 'staff-service.default' and clicking on 'Find Traces'.
+
+We will clik on one of the tracked vihacles in the front end of our example application and send upstream request to the Webapp pod visualized on picture (Upstream & downstream request path.png) in the session resources folder. Then downstream request (response) will be received by the Webapp pod after approximatelly 10 seconds or less. The representation of Jaeger is little bit different - it summarize overall process time in the first point where the request was sent (Upstream & downstream request Jaeger result.png).
+
+Other terinology used in the trace processing are visualized on picture Trace-Terminology.png
+	- Trace - all measured timings and overall upstram and downstream request duration
+	- Span - single section of the request process timing
+
+The exact upstream request path we can see on picture Upstream-Request-Trace.png.
+
+
 
 
 
@@ -391,10 +432,35 @@ We will go over Jaeger which is distributed tracing framework.
 24. Using Jaeger UI
 ===================
 
-Expose jaeger (tracing)
+
+Expose Jaeger (tracing) service if not exposed
 	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
 		
-	We can now access tracing on http://localhost:8080
+Access Jaeger on http://localhost:8080
+
+We need to select service in the 'Service' field to use Jaeger. Without selecting a service the button "Find Traces" isn't active.
+When we select a service and click 'Find Traces' we will receive all events that this service was involved in.
+
+Case:
+-----
+When we pick another vihacle (different from the current one) on the client application - http://127.0.0.1:30080/, we send request to the backend. Lets say we have unexpected delay and problem with receiving the driver's picture. We will use Jaeger to trace and find the potential problem.
+
+We know that all requests in our example application are going true webapp pod. So in Jaeger UI (http://localhost:8080) we select webapp.default service. We should see a lot of traces. We can use the histogram to analyze which requests are slowest and investigate the reason.
+
+
+Investigation process:
+----------------------
+Lets say we want to track slow request connected with the picture of one of the drivers. 
+
+Configure Request filter: In Jaeger UI in 'Lookback' field we set 'Custom Time Range' and in the 'Start Time' field we set the current time, in the 'End Time' field we switch to a day ahead. By this configs we will filter requests sent in the suggested time period: one day from the current time. 
+
+Simulate user activity: We make request by clicking one time on different driver on the application (http://127.0.0.1:30080/).
+
+Find Traces: In Jaeger UI we click on 'Find Traces' and receive the traces of the sent request. We receive 2 traces: one for vihacle history and the other for drivers details. Made requests depends of the application implementation. Each trace has a summary with number of spans and what services its request went true. Expand one of the traces by clicking on one of them. We will see trace details visualized example on picture 'trace-details.png' in the session resource folder.
+
+Analyze traces: We can see the request process in depth in section 'Service & Operation'. We can expand any step (span) of the request process and look over the details. Also e can select specific timeframe of the span by hover over the timeline. We can track span details as expand 'Tags' section and find the request type, target URL, response code and more details connected with the request.
+
+(Optional) We can compare 2 or more traces by selecting them with checboxes and click 'Compare Traces'. This could be useful in specific situations.
 
 
 
@@ -402,26 +468,145 @@ Expose jaeger (tracing)
 25. Why you need to "Propagate Headers"
 =======================================
 
+TRACE FEATURE REQUIRES CHANGES ON OUR APPLICATION CODE !!!
+----------------------------------------------------------
+
+This is the only Istio feature that requires changes in our application code. The trace feature is very useful and is it worth to implement these changes and use it!
+
+We need to set corelation for the Jaeger to connect requests in different traces. This corelation mechanism is configured with 'guid:x-request-id' field (global unique identifier) in the span/tags details presented on picture 'propagate-headers.png' in the session resource folder. This field is the same for each span in the trace. It si s generated by the first proxy container (envoy/sidecar) and passed to the next one. Unfortunately we need to configure our application to pass this 'x-request-id' after pod respond to the proxy request. The logic is visualized in the picture 'guid-logic.png'.
+
+We need to save the passed (incoming) header in variable or database and pass it with the outgoing request to the proxy container again.
+
+If we don't set this 'x-request-id' headers to be passed by our application logic then the traces will be chunked to many smaller traces and it will be very difficult to track the requests. Istio DO NOT apprach automated headers prpagation at all!
+
+We can find the distributed tracing requirements here - https://istio.io/latest/about/faq/#distributed-tracing.
+
+DISTRIBUTED TRACING REQUIREMENTS WITH ISTIO
+--------------------------------------------------------------
+What is required for distributed tracing with Istio?
+
+Istio enables reporting of trace spans for workload-to-workload communications within a mesh. However, in order for various trace spans to be stitched together for a complete view of the traffic flow, applications must propagate the trace context between incoming and outgoing requests.
+
+In particular, Istio relies on applications to forward the Envoy-generated request ID, and standard headers. These headers include:
+
+   - x-request-id
+   - traceparent
+   - tracestate
+
+Zipkin users must ensure they propagate the B3 trace headers.
+
+    x-b3-traceid
+    x-b3-spanid
+    x-b3-parentspanid
+    x-b3-sampled
+    x-b3-flags
+    b3
+
+Header propagation may be accomplished through client libraries, such as OpenTelemetry. It can also be accomplished manually, as documented in the Distributed Tracing task.
+--------------------------------------------------------------
+
+
+Why can't Istio propagate headers instead of the application? - https://istio.io/latest/about/faq/#distributed-tracing
+---------------------------------------------------------------------
+Although an Istio sidecar will process both inbound and outbound requests for an associated application instance, it has no implicit way of correlating the outbound requests to the inbound request that caused them. The only way this correlation can be achieved is if the application propagates relevant information (i.e. headers) from the inbound request to the outbound requests. Header propagation may be accomplished through client libraries or manually. Further discussion is provided in What is required for distributed tracing with Istio?.
+---------------------------------------------------------------------
+
+
+Building applications to support trace context propagation - https://istio.io/latest/docs/tasks/observability/distributed-tracing/overview/#building-applications-to-support-trace-context-propagation
+
+Configure Istio for distributed tracing with Jaeger - https://istio.io/latest/docs/tasks/observability/distributed-tracing/jaeger/#configure-istio-for-distributed-tracing
+
 
 
 
 26. What happens if you don't propagate headers?
 ================================================
 
+This section present the test application without headers propagation configuration. 
+
+When we test the tracing feature and make request as in the previous session, we receive the same traces but with less information. The connected spans are only to the end of the initial guid header traced. If we want to trace further the request made we need to find traces connected with the next application container that do not pass the same guid. We need to know what the next application container is and find traces for it and filter the traces and so on. 
+
+This makes the Jaeger much less usable and time and effort consuming.
+
+
+
+
 
 
 27. Metrics with Grafana
 ========================
 
+We can use Grafana/Prometheus to monitor resource consumption (CPU, storage, etc.). This case is different then what we are going to look over now.
+
+In this section we will use Grafana/Prometheus to monitor the traffic between our application services.
+
+Find Grafana service
+	terminal --> k get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)
+grafana                NodePort    10.102.89.82     <none>        3000:31002/TCP		# this is grafana service
+istio-egressgateway    ClusterIP   10.105.212.49    <none>        80/TCP,443/TCP
+istio-ingressgateway   NodePort    10.100.233.83    <none>        15021:32300/TCP,80:31380/TCP,443:32589/TCP,31400:31000/TCP,15443:31988/TCP
+istiod                 ClusterIP   10.110.254.210   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP
+jaeger-collector       ClusterIP   10.103.147.126   <none>        14268/TCP,14250/TCP
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP
+prometheus             ClusterIP   10.100.141.126   <none>        9090/TCP 
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP 
+zipkin                 ClusterIP   10.99.133.244    <none>        9411/TCP 
 
 
+Forward grafana port
+	terminal --> kubectl port-forward svc/grafana 3000:3000 -n istio-system
+
+Access grafana on http://localhost:3000
 
 
+On the top left side we can click on HOME/Istio and choose from different dashboards. We will go over the most used dashboards:
+	- Istio Service Dashboard
+	- Istio Workload Dashboard
 
 
+Istio Workload Dashboard
+------------------------
+Select the correct metrics provisioner, namespace and workload:
+	1. Datasource - Prometheus
+	2. Namespace - default
+	3. Workload - staff-service
+
+At the top right section we can set time periods for:
+	- monitored period - example Last 1 hour
+	- refresh period - 60 seconds by default
+
+Expand all section - General, Inbound Workloads and Outbound Workloads
 
 
+Most useful graphs
+	- Incoming Request Volume
+	- Incoming Success Rate (non-5xx responses) - Healthy responses
+	- Request Duration
+	- Incoming Request Duration By Source - this graph will separate the requests by their source
 
+We can view details for each graph by selecting it + v or dropdown menu/view. Escape full screen view with escape.
+
+Incoming Request Duration By Source graph - In this graph we can see groups of requests and their durations separated by source. On the bottom we can select specific source and look over the requests from this source only.
+
+Istio Service Dashboard
+-----------------------
+Select the correct metrics provisioner, namespace and workload:
+	1. Datasource - Prometheus
+	2. Service - fleetman-staff-service.default.svc.cluster.local
+	3. Client Workload Namespace - default
+
+In this dashboard we can see almost duplicated information from the Workload Dashboard.
+
+
+Other useful Dahsboards
+-----------------------
+	- Istio Mesh Dashboard - Global requests metrics of our cluster
+	- Istio Performance Dahsboard - We can look over Istio resource consumption
+	- Istio Wasm Extension Dashboards - Advanced Istio extensions
+	- Istio Control Plane Dashboard
 
 
 
