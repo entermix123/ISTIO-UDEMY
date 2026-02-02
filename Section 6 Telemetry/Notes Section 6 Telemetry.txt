@@ -1,0 +1,438 @@
+Section 6 Telemetry
+===================
+
+Section content:
+----------------
+
+20. Starting the Demo System
+21. Kiali Deeper Dive
+22. Kiali Dynamic Traffic Routing
+23. Distributed Tracing Overview
+24. Using Jaeger UI
+25. Why you need to "Propagate Headers"
+26. What happens if you don't propagate headers?
+27. Metrics with Grafana
+
+
+Optional
+--------
+Set alias for kubectl in bash 
+	1. Add the alias: bash --> echo "alias k='kubectl'" >> ~/.bashrc
+	2. Apply it: bash --> source ~/.bashrc
+
+
+
+20. Starting the Demo System
+============================
+
+In this session we will use Istio, Kiali and Grafana. With this tools we will be able to go over all other topics in the course. As we know we deployed broken/slow application in Section 4 Hands on Demo. This time we will deploy healthy nad working application.
+
+
+We will use resources in folder '1-Telemetry'
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-label-default-namespace.yaml
+	- 5-application-no-istio.yaml
+
+Navigate to the resource folder and setup the scenario:
+	Delete the old Minikube cluster
+		terminal --> minikube delete
+	Create new Minikube cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+	Test the connection
+		terminal --> kubectl get nodes
+
+		# result:
+		NAME       STATUS   ROLES           AGE   VERSION
+		minikube   Ready    control-plane   10s   v1.35.0
+
+
+	Deply provided resources
+		terminal --> cd 1-Telemetry
+		
+ISNTALL LATEST ISTIO - for Widnows
+--------------------
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH=$PWD/bin:$PATH
+
+Install Istio
+	bash --> istioctl install --set profile=demo -y
+
+Enable sidecar injection on the working namespace (default)
+	bash --> kubectl label namespace default istio-injection=enabled
+
+Verify installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kj4pd     1/1     Running   0          76s
+	istio-ingressgateway-6f868bc4f7-qkmc6   1/1     Running   0          76s
+	istiod-77cb77f5b8-7clw4                 1/1     Running   0          95s
+
+	# all pods must be running
+
+APPLY PROVIDED RESOURCES
+------------------------
+Apply the provided init file - this will modify the installed Istio installation to work with the provided resources
+	bash -->  kubectl apply -f 1-istio-init.yaml
+
+Apply the CRD 2-istio-minikube.yaml
+	bash --> kubectl apply -f 2-istio-minikube.yaml
+
+Test installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   0          5m46s	# grafana runs with prometheus
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   0          5m47s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   0          5m47s	# ingress gateway (incoming traffic)
+	istiod-65cdd474f7-l4wmp                1/1     Running   0          5m47s	# istio deamon
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   0          5m46s	# Jaeger Traces service
+	kiali-594fb85dc8-s68bb                 1/1     Running   0          5m45s	# Kiali UI service
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   0          5m46s	# prometheus works with grafana
+
+
+Apply the CRD 3-kiali-secret.yaml to prevent login requirements to Kiali UI every time
+	bash --> kubectl apply -f 3-kiali-secret.yaml
+
+	# result: secret/kiali created
+
+
+Apply the CRD 4-label-default-namespace.yaml to label default namespace to be Istio enabled. 
+	bash --> kubectl apply -f 4-label-default-namespace.yaml
+	
+	# result: namespace/default configured
+
+	Confirm labeling
+		bash --> kubectl describe ns default
+
+		# result: Labels:       istio-injection=enabled
+
+	# This will add the additional proxy container is every pod application in the 'default' namespace.
+	# It is important to apply this label to the working namespace before start deploying the application
+
+
+Deploy the application
+	bash --> kubectl apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator created
+	deployment.apps/position-tracker created
+	deployment.apps/api-gateway created
+	deployment.apps/webapp created
+	deployment.apps/vehicle-telemetry created
+	deployment.apps/staff-service created
+	service/fleetman-webapp created
+	service/fleetman-position-tracker created
+	service/fleetman-api-gateway created
+	service/fleetman-vehicle-telemetry created
+	service/fleetman-staff-service created
+
+We could need some additional YAML configuration when/if we set custom routing but in this application everything is set.
+
+List pods to confirm that every pod has 2 containers - app + proxy (istio)
+	terminal --> kubectl get pods
+
+	# result:
+	NAME                                  READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-wxc76          2/2     Running   0          3m14s
+	position-simulator-8449f4c5cc-pnkxd   2/2     Running   0          3m14s
+	position-tracker-676dd958cf-2v9b5     2/2     Running   0          3m14s
+	staff-service-59b8695469-9sfxm        2/2     Running   0          3m14s
+	vehicle-telemetry-64bb8b49-kfv6b      2/2     Running   0          3m14s
+	webapp-cc469458d-rsnpl                2/2     Running   0          3m14s
+
+We can see that all pods has 2 contaires in them. This means that proxy (Istio) container is successfully injected.
+If we forget to label the namespace the proxy containers (sidecar) will not be deployed in the pods. 
+
+If we implement Istio on existing cluster we need to apply the label for the target namespace and then restart each pod in it so they can be recreated with the additional proxy container. This can cause services downtime and we must be carefull with what Kubernetes cluster we are working with.
+
+
+Expose the installed application with port forward
+	terminal --> kubectl port-forward svc/fleetman-webapp 30080:80
+		
+	Access the application on http://127.0.0.1:30080/
+
+
+
+
+
+21. Kiali Deeper Dive
+=====================
+
+TELEMETRY REQUIREMENTS
+----------------------
+1. Running (Envoy Sidecar) Proxy in each pod we wnat to monitor
+2. Istion control plane need to be running (ie. istiod{istiodaemon}, kiali{UI}, jaeger{tracer}, grafana{present data})
+3. We DON"T need any specific Istio YAML configuration (NO need for VirtualServices, Gateways, etc.)
+
+Confirm requirements
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS      AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   1 (11h ago)   12h
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   1 (11h ago)   12h
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   1 (11h ago)   12h
+	istiod-65cdd474f7-l4wmp                1/1     Running   1 (11h ago)   12h
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   1 (11h ago)   12h
+	kiali-594fb85dc8-s68bb                 1/1     Running   1 (11h ago)   12h
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   2 (11h ago)   12h
+
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+	NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      AGE
+grafana                NodePort    10.102.89.82     <none>        3000:31002/TCP                                                               12h
+istio-egressgateway    ClusterIP   10.105.212.49    <none>        80/TCP,443/TCP                                                               12h
+istio-ingressgateway   NodePort    10.100.233.83    <none>        15021:32300/TCP,80:31380/TCP,443:32589/TCP,31400:31000/TCP,15443:31988/TCP   12h
+istiod                 ClusterIP   10.110.254.210   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP                                        12h
+jaeger-collector       ClusterIP   10.103.147.126   <none>        14268/TCP,14250/TCP                                                          12h
+prometheus             ClusterIP   10.100.141.126   <none>        9090/TCP                                                                     12h
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP                                                                 12h
+zipkin                 ClusterIP   10.99.133.244    <none>        9411/TCP                                                                     12h
+
+We don't have Kiali service so we need to set one in order to access Kiali feature.
+
+Create/expose Kiali service
+	terminal --> kubectl expose deployment kiali -n istio-system --type=NodePort --port=20001 --target-port=20001
+
+	# result: service/kiali exposed
+
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      AGE
+grafana                NodePort    10.102.89.82     <none>        3000:31002/TCP                                                               12h
+istio-egressgateway    ClusterIP   10.105.212.49    <none>        80/TCP,443/TCP                                                               12h
+istio-ingressgateway   NodePort    10.100.233.83    <none>        15021:32300/TCP,80:31380/TCP,443:32589/TCP,31400:31000/TCP,15443:31988/TCP   12h
+istiod                 ClusterIP   10.110.254.210   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP                                        12h
+jaeger-collector       ClusterIP   10.103.147.126   <none>        14268/TCP,14250/TCP                                                          12h
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP      	# This is the created Kiali UI service                                                        14s
+prometheus             ClusterIP   10.100.141.126   <none>        9090/TCP                                                                     12h
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP                                                                 12h
+zipkin                 ClusterIP   10.99.133.244    <none>        9411/TCP 
+
+
+Expose Istio Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the Istion UI on http://localhost:20001
+
+
+OVERVIEW PAGE
+-------------
+When we set bigger timeframe (example 30 minutes) we can see that some of the applications are not healthy. This is because when the system is started not all pods can communicate at first. If we set the timeframe to 1 minute all the warnings are gone and all applications are healthy. This is tricky moment and we can be confused and missled if we don't understand the timeframe issues.
+
+
+GRAPH PAGE
+----------
+We need to set the namespace we want to visualize - in this case 'default'
+By default "Versioned App Graph" is visualized. Choose the most easiest one for now - 'Service graph'
+
+Service graph
+-------------
+Some of the specifics in the visualization:
+	- Gray lines are not active in the time period we are looking over. They will be removed from the graph if no traffic is detected for some time.
+	- Green lines are active traffic between services
+
+When we click on different vihacle on the system frontend - http://127.0.0.1:30080/ , we have to wait 1-2 data updates (refresh on 15 seconds by default) events to see that the gray line is turning green again (active traffic is detected). It takes some time for the telemetry data to be picked up and analized. It is not happening immediately.
+
+We can choose from 3 layouts from the bottom menu field. They represent the serices connections in different shape. Choose whatever fells more understandable and clear.
+	- Layout 1 - left-right formation
+	- Layout 2 and 3 - star formation
+
+If the graph has many visualized service and it is hard to track they connection, we can double click on specific service/object and personal graph for this service/object will be visualized. This makes the analysis easier in heavy populated namespaces.
+
+We also can right click on specific service and choose one of the optios:
+	- Show Details - information about the pods behind the service
+	- Show Traffic - information about involved objects in the communication - source -> destination
+	- Show Inbound Metrics - information about request volume and duration over time
+
+
+Workload Graph
+--------------
+Another useful display is 'Workload Graph'. Choose it and pick the layout you prefere the most.
+
+We can open the Legend and see the objects we are working with. The difference from other graphs is the circle object. It is pods (Workload). If we have multiple pods behind one service we will still see only one circle (collective workload)!
+
+We can get useful information by choosing 'Response Time' from Display dropdown menu.
+
+We also can right click on specific workload and choose one of the optios: 
+	- Show Details - information about workload properties, Graph Overview and Health
+	- Show Traffic - information about workload destinations
+	- Show Logs - We can see the logs of the pods included in the specific workload
+		- We can choose specific pod and container in the dropdown menu
+	- Show Inbound Metrics - information about inbound metrics
+	- Show Outbound Metrics - information about request volume and duration over time
+
+We can also enable 'Traffic Animation' from 'Display' drop down menu see how the traffic atually is directed.
+
+
+Main points
+-----------
+	- Only recently active traffic communications are presented on the grapg page. 
+	- We can set bigger time period to check more historical traffic activity.
+	- If we want to activate traffic rout, we need to manually send requests true this services to visualize them.
+	- Use graphs for specific service or pods to analyze it in details like requests volume, response time and logs
+
+
+
+
+22. Kiali Dynamic Traffic Routing
+=================================
+
+On Graph/Service Graph page we can make changes live with Kiali. 
+
+Case: 
+-----
+Leets say we have problems with 'fleetman-staff-service' - make calls to external APIs, drive the system to run additional nodes and require resources we don't have etc. We can restrict the service without deleting pods.
+
+We can restrict specific service by using 'virtuaservices' (vs) and 'destinationrules' (dr). These are Kubernetes objects provided by Istio. 
+
+List virtual services
+	terminal --> kubectl get vs	# result: No resources found in default namespace.
+
+List destination rules
+	terminal --> kubectl get dr	# result: No resources found in default namespace.
+
+
+We can create these resources with terminal or from Kiali UI.
+
+Set traffic suspension
+----------------------
+Create 'virtualservice' and 'restinationrule' with Kiali UI to suspend traffic for 'fleetman-staff-service'
+	- Go on Graph/Serice graph/right clik on 'fleetman-staff-service'/Show Details
+	- Top right we have 'Actions' button with 3 options
+		- Craete Weighted Routing
+		- Create Matching Routing
+		- Suspend Traffic
+	- Click 'Suspend Traffic'/Create
+	
+Now on Graph/Service Graph we can see that 'fleetman-staff-service' service became flagged as 'Has Virtual Service'. Also 'position-simulator' workload is affected by this suspention. This is called chain failure.
+
+List virtual services
+	terminal --> kubectl get vs	
+
+	# result: 
+	NAME                     GATEWAYS   HOSTS                                                  AGE
+	fleetman-staff-service              ["fleetman-staff-service.default.svc.cluster.local"]   111s
+
+List destination rules
+	terminal --> kubectl get dr
+
+	# result: 
+	NAME                     HOST                                               AGE
+	fleetman-staff-service   fleetman-staff-service.default.svc.cluster.local   2m6s
+
+
+We can see that 'virtualservice' (vs) and 'destinationrule' (dr) are created by Istio from Kiali UI.
+
+This is emergency action and it is not recommended for production operation. The proper way to handle this issue is to manage YAML files manually and then apply them with proper definitive engineering approach.
+
+
+We can see details for this objects on Istio Config Page in Kiali UI.
+We can look at the created YAML files at:
+	- Istio Config/Sfleetman-staff-service(VirtualService)/YAML
+	- Istio Config/Sfleetman-staff-service(DestinationRule)/YAML
+
+	We can use these YAML templates to manage our own Virtual Services and Destination Rules manifests. 
+
+
+Restore traffic suspension
+--------------------------
+We will delete the traffic suspension from Kiali UI as we created it
+	- Go on Graph/Serice graph/right clik on 'fleetman-staff-service'/Show Details
+	- Click Actions/Delete ALL Traffic Routing
+	- Click Delete
+
+After few seconds (almost instantly) we will see that the application is working properly
+
+After 15-30 seconds (1-2 refreshes) we can see that the traffic on the Graph/Service Graph Page is also restored.
+
+
+Confirm 'virtualservice' and 'destinationrule' deletion
+-------------------------------------------------------
+List virtual services to confirm deletion
+	terminal --> kubectl get vs	# result: No resources found in default namespace.
+
+List destination rules to confirm deletion
+	terminal --> kubectl get dr	# result: No resources found in default namespace.
+
+
+
+
+
+23. Distributed Tracing Overview
+================================
+
+We will go over Jaeger which is distributed tracing framework. 
+
+
+
+
+24. Using Jaeger UI
+===================
+
+Expose jaeger (tracing)
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access tracing on http://localhost:8080
+
+
+
+
+25. Why you need to "Propagate Headers"
+=======================================
+
+
+
+
+26. What happens if you don't propagate headers?
+================================================
+
+
+
+27. Metrics with Grafana
+========================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
