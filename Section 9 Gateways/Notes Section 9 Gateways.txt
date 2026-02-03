@@ -25,7 +25,7 @@ Start the cluster
 
 IF WE DONT HAVE RUNNING CLUSTER WITH INSTALLED ISTIO AND EXAMPLE APPLICATION WE NEED TO EXECUTE THE COMMANDS AS FOOLOW:
 ---------------------------------------------------------------------------------------
-We will use resources in folder '1-Telemetry'
+We will use resources in folder 'Manifests'
 	- 1-istio-init.yaml
 	- 2-istio-minikube.yaml
 	- 3-kiali-secret.yaml
@@ -833,7 +833,14 @@ Expose the application with port forwarding
 
 
 
-
+Delete the configuration for the nextt example
+	terminal --> k delete -f 6-istio-rules-subdomain.yaml
+		
+	# result:
+	gateway.networking.istio.io "ingress-gateway-configuration" deleted from default namespace
+	virtualservice.networking.istio.io "fleetman-webapp" deleted from default namespace
+	virtualservice.networking.istio.io "fleetman-webapp-experiment" deleted from default namespace
+	destinationrule.networking.istio.io "fleetman-webapp" deleted from default namespace
 
 
 
