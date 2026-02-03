@@ -1,0 +1,34 @@
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: a-set-of-routing-rules-we-can-call-this-anything   # "just" a name for this virtualservice
+  namespace: default                                       # target namespace
+spec:
+  hosts:
+    - fleetman-staff-service.default.svc.cluster.local     
+    # FQDN (fully qualified domain name) if we call the service from another namespace (recommended)
+    # or The Service DNS (ie the regular K8S Service) - 'fleetman-staff-service' if we call the service from same namespace 
+  http:
+    - route:
+        - destination:                                                   # first destination - old app version
+            host: fleetman-staff-service.default.svc.cluster.local       # The Target DNS name - FQDN
+            subset: all-staff-service-pods                               # The name defined in the DestinationRule
+            # weight: 100 - no need if we have only one destination
+
+---
+kind: DestinationRule                                           # Defining which pods should be part of each subset
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: grouping-rules-for-our-photograph-canary-release        # This can be anything you like.
+  namespace: default
+spec:
+  host: fleetman-staff-service     # Service - we target all pods behind this service
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        # useSourceIp: true
+        httpHeaderName: "x-myval"
+  subsets:
+    - labels:                      # SELECTOR 1
+        app: staff-service              # find pods with this label - all pods
+      name: all-staff-service-pods      # all pods with the label "app: staff-service"

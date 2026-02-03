@@ -1,0 +1,35 @@
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: a-set-of-routing-rules-we-can-call-this-anything   # "just" a name for this virtualservice
+  namespace: default                                       # target namespace
+spec:
+  hosts:
+    - fleetman-staff-service.default.svc.cluster.local     
+    # FQDN (fully qualified domain name) if we call the service from another namespace (recommended)
+    # or The Service DNS (ie the regular K8S Service) - 'fleetman-staff-service' if we call the service from same namespace 
+  http:
+    - route:
+        - destination:                                                   # first destination - old app version
+            host: fleetman-staff-service.default.svc.cluster.local       # The Target DNS name - FQDN
+            subset: safe-group                                           # The name defined in the DestinationRule
+          weight: 90                    # traffic procentage 
+        - destination:                                                   # second destination - new app version
+            host: fleetman-staff-service.default.svc.cluster.local       # The Target DNS name - FQDN
+            subset: risky-group                                          # The name defined in the DestinationRule
+          weight: 10                    # traffic procentage
+---
+kind: DestinationRule                                           # Defining which pods should be part of each subset
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: grouping-rules-for-our-photograph-canary-release        # This can be anything you like.
+  namespace: default
+spec:
+  host: fleetman-staff-service     # Service - we target all pods behind this service
+  subsets:
+    - labels:                      # SELECTOR 1
+        version: safe              # find pods with label "version: safe"
+      name: safe-group             # set the found pods with label "version: safe" in this group
+    - labels:                      # SELECTOR 2
+        version: risky             # find pods with label "version: risky"
+      name: risky-group            # set the found pods with label "version: risky" in this group
