@@ -1,0 +1,36 @@
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service              # unique name for virtual service
+  namespace: default                        # destination namespace
+spec:
+  hosts:
+    - fleetman-staff-service                # hostname of the service
+  http:
+    - match:
+        - headers:                          # IF
+            x-my-header:                    # match custom header wiht 'x-' for the header propagation !!! See section 6/25
+              exact: canary                 # with exact header value 
+      route:                                # THEN
+        - destination:                      # route the request to
+            host: fleetman-staff-service    # target service
+            subset: risky                   # with subset name
+    - route:                                # CATCH ALL OTHERS
+        - destination:                      # route the request to
+            host: fleetman-staff-service    # target service
+            subset: safe                    # with subset name
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service              # unique name for destination rule
+  namespace: default                        # destination namespace
+spec:
+  host: fleetman-staff-service              # target service
+  subsets:                                  # define subsets
+    - labels:                               # find pods
+        version: safe                       # with label 'version: safe'
+      name: safe                            # set the found pods with label 'version: safe' in this group
+    - labels:                               # find pods
+        version: risky                      # with label 'version: risky'
+      name: risky                           # set the found pods with label 'version: risky' in this group

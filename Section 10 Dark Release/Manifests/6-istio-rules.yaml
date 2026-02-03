@@ -1,0 +1,53 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-configuration     # name of the gateway
+spec:
+  selector:
+    istio: ingressgateway    # use Istio default gateway implementation - label of instio ingressgateway pod in istio-system namespace
+  servers:
+  - port:
+      number: 80
+      name: http             # name of the port
+      protocol: HTTP         # protocol
+    hosts:
+    - "*"   # Domain name of the external website
+---
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp                 # unique name of the virtual service - if not uniques the last will overwrite others
+  namespace: default                    # destination namespace
+spec:
+  hosts:
+    - "*"     # Domain name of the website - not for production
+  gateways:
+    - ingress-gateway-configuration     # name of the gateway
+  http:
+    - match:
+      - headers:                     # IF
+          my-header:                 # custom header
+            exact: canary            # the header value is 'canary' - staging envronment example
+      route:                         # THEN
+      - destination:
+          host: fleetman-webapp      # The Target DNS name - not FQDN
+          subset: experimental       # The subset name defined in the DestinationRule for the staging environment
+    - route:                         # CATCH ALL except canary header for the production environment
+      - destination:
+          host: fleetman-webapp      # The Target DNS name - not FQDN
+          subset: original           # The subset name defined in the DestinationRule for the production environment
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp              # name of the destination rule
+  namespace: default
+spec:
+  host: fleetman-webapp              # The Target DNS name - not FQDN  
+  subsets:
+    - labels:
+        version: original            # find pods with label version: original
+      name: original                 # group found pods with label version: original in this subset
+    - labels:
+        version: experimental        # find pods with label version: experimental
+      name: experimental             # group found pods with label version: experimental in this subset
