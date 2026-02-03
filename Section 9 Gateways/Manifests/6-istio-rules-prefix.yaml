@@ -1,0 +1,57 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-configuration
+spec:
+  selector:
+    istio: ingressgateway     # use Istio default gateway implementation - label of instio ingressgateway pod in istio-system namespace
+  servers:
+  - port:
+      number: 80              # port number
+      name: http              # name of the port
+      protocol: HTTP          # protocol 
+    hosts:
+    - "*" # Use the real Domain name of the external website in production
+---
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  hosts:
+    - "*"    # Add the domain name of the gateway, Use the real Domain name of the external website in production
+  gateways:
+    - ingress-gateway-configuration
+  http:
+    - match:
+      - uri:                                            # IF
+          prefix: "/experimental"                       # if request is coming with this prefix
+      - uri:                                            # OR                                        
+          prefix: "/canary"                             # if request is coming with this prefix
+      route:                                            # THEN
+      - destination:                                    # route the request to
+          host: fleetman-webapp                         # The Target DNS name
+          subset: experimental                          # The subset name defined in the DestinationRule
+    - match:                                            # IF
+      - uri:
+          prefix: "/"                                   # if request is coming with this prefix
+      route:                                            # THEN
+      - destination:                                    # route the request to
+          host: fleetman-webapp                         # The Target DNS name
+          subset: original                              # The subset name defined in the DestinationRule
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  host: fleetman-webapp
+  subsets:
+    - labels:
+        version: original
+      name: original
+    - labels:
+        version: experimental
+      name: experimental

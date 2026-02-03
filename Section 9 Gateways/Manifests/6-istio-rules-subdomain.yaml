@@ -1,0 +1,62 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-configuration       # name of the gateway
+spec:
+  selector:
+    istio: ingressgateway                   # use Istio default gateway implementation - label of instio ingressgateway pod in istio-system namespace
+  servers:
+  - port:
+      number: 80
+      name: http                            # name of the port
+      protocol: HTTP                        # protocol
+    hosts:
+    - "*.fleetman.com"                      # Domain name of the website with subdomains *. - all subdomains
+    - "fleetman.com"                        # Main domain name of the website - must be configured separatelly
+---
+kind: VirtualService                        # virtual service for main domain name 'fleetman.com'
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp                    # original version of the app
+  namespace: default
+spec:
+  hosts:                                   # which incoming host are we applying the proxy rules to???
+    - "fleetman.com"                       # Domain name of the website
+  gateways:
+    - ingress-gateway-configuration        # name of the gateway
+  http:
+    - route:
+      - destination:
+          host: fleetman-webapp            # The Target DNS name - not FQDN
+          subset: original                 # The subset name defined in the DestinationRule
+---
+kind: VirtualService                       # virtual service for subdomain name 'experimental.fleetman.com'
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp-experiment        # unique name of the virtual service - if not uniques the last will overwrite others
+  namespace: default                      # destination namespace
+spec:
+  hosts:                                  # which incoming host are we applying the proxy rules to???
+    - "experimental.fleetman.com"         # Domain name of the website
+  gateways:                               # gateway section
+    - ingress-gateway-configuration       # name of the gateway
+  http:
+      - route:
+        - destination:
+            host: fleetman-webapp         # The Target DNS name - not FQDN
+            subset: experimental          # The subset name defined in the DestinationRule
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp                   # name of the destination rule
+  namespace: default
+spec:
+  host: fleetman-webapp                   # The Target DNS name - not FQDN
+  subsets:
+    - labels:
+        version: original                 # find pods with label version: original
+      name: original                      # group found pods with label version: original in this subset
+    - labels:
+        version: experimental             # find pods with label version: experimental
+      name: experimental                  # group found pods with label version: experimental in this subset
