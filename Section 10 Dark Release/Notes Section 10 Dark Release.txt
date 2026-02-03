@@ -1,0 +1,479 @@
+10 Dark Release
+===============
+
+Section content:
+----------------
+42. Using a browser extension to modify headers
+43. If you have problems in the next section
+44. Header Based Routing
+45. Dark Releases for all Microservices
+
+
+
+
+PREREQUISITES
+-------------
+
+Optional
+--------
+Set alias for kubectl in bash 
+	1. Add the alias: bash --> echo "alias k='kubectl'" >> ~/.bashrc
+	2. Apply it: bash --> source ~/.bashrc
+
+
+INSTALL THE SETUP WITH THE PROVIDED MANIFESTS
+---------------------------------------------------------------------------------------
+We will use resources in folder 'Manifests'
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-label-default-namespace.yaml
+	- 5-application-no-istio.yaml
+
+Navigate to the resource folder and setup the scenario:
+	Delete the old Minikube cluster
+		terminal --> minikube delete
+
+	Create new Minikube cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+	Test the connection
+		terminal --> kubectl get nodes
+
+		# result:
+		NAME       STATUS   ROLES           AGE   VERSION
+		minikube   Ready    control-plane   10s   v1.35.0
+
+
+	Deply provided resources
+		terminal --> cd 1-Telemetry
+		
+ISNTALL LATEST ISTIO - for Widnows
+--------------------
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH=$PWD/bin:$PATH
+
+Install Istio
+	bash --> istioctl install --set profile=demo -y
+
+Enable sidecar injection on the working namespace (default)
+	bash --> kubectl label namespace default istio-injection=enabled
+
+Verify installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kj4pd     1/1     Running   0          76s
+	istio-ingressgateway-6f868bc4f7-qkmc6   1/1     Running   0          76s
+	istiod-77cb77f5b8-7clw4                 1/1     Running   0          95s
+
+	# all pods must be running
+
+APPLY PROVIDED RESOURCES
+------------------------
+Apply the provided init file - this will modify the installed Istio installation to work with the provided resources
+	bash -->  kubectl apply -f 1-istio-init.yaml
+
+Apply the CRD 2-istio-minikube.yaml
+	bash --> kubectl apply -f 2-istio-minikube.yaml
+
+Test installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   0          5m46s	# grafana runs with prometheus
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   0          5m47s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   0          5m47s	# ingress gateway (incoming traffic)
+	istiod-65cdd474f7-l4wmp                1/1     Running   0          5m47s	# istio deamon
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   0          5m46s	# Jaeger Traces service
+	kiali-594fb85dc8-s68bb                 1/1     Running   0          5m45s	# Kiali UI service
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   0          5m46s	# prometheus works with grafana
+
+
+Apply the CRD 3-kiali-secret.yaml to prevent login requirements to Kiali UI every time
+	bash --> kubectl apply -f 3-kiali-secret.yaml
+
+	# result: secret/kiali created
+
+Apply the CRD 4-label-default-namespace.yaml to label default namespace to be Istio enabled. 
+	bash --> kubectl apply -f 4-label-default-namespace.yaml
+	
+	# result: namespace/default configured
+
+	Confirm labeling
+		bash --> kubectl describe ns default
+
+		# result: Labels:       istio-injection=enabled
+
+	# This will add the additional proxy container is every pod application in the 'default' namespace.
+	# It is important to apply this label to the working namespace before start deploying the application
+
+Deploy the application
+	bash --> kubectl apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator created
+	deployment.apps/position-tracker created
+	deployment.apps/api-gateway created
+	deployment.apps/webapp created
+	deployment.apps/vehicle-telemetry created
+	deployment.apps/staff-service created
+	service/fleetman-webapp created
+	service/fleetman-position-tracker created
+	service/fleetman-api-gateway created
+	service/fleetman-vehicle-telemetry created
+	service/fleetman-staff-service created
+
+List pods to confirm that every pod has 2 containers - app + proxy (istio)
+	terminal --> kubectl get pods
+
+	# result:
+	NAME                                  READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-wxc76                   2/2     Running   8 (101m ago)   2d23h
+	position-simulator-8449f4c5cc-pnkxd            2/2     Running   8 (101m ago)   2d23h
+	position-tracker-676dd958cf-2v9b5              2/2     Running   8 (101m ago)   2d23h
+	staff-service-75cf5d8954-4tkkf                 2/2     Running   0              3m40s	# original version
+	staff-service-risky-version-85d56bcdbf-z7497   2/2     Running   4 (101m ago)   24h	# new version
+	vehicle-telemetry-64bb8b49-kfv6b               2/2     Running   8 (101m ago)   2d23h
+	webapp-d688b487-z6brz                          2/2     Running   3 (100m ago)   7h51m
+	webapp-experimental-78667747df-xq849           2/2     Running   3 (100m ago)   7h40m
+
+
+We can see that all pods has 2 contaires in them. This means that proxy (Istio) container is successfully injected.
+If we forget to label the namespace the proxy containers (sidecar) will not be deployed in the pods. 
+
+
+TELEMETRY REQUIREMENTS
+----------------------
+1. Running (Envoy Sidecar) Proxy in each pod we wnat to monitor
+2. Istion control plane need to be running (ie. istiod{istiodaemon}, kiali{UI}, jaeger{tracer}, grafana{present data})
+3. We DON"T need any specific Istio YAML configuration (NO need for VirtualServices, Gateways, etc.)
+
+Confirm requirements
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS      AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   1 (11h ago)   12h
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   1 (11h ago)   12h
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   1 (11h ago)   12h
+	istiod-65cdd474f7-l4wmp                1/1     Running   1 (11h ago)   12h
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   1 (11h ago)   12h
+	kiali-594fb85dc8-s68bb                 1/1     Running   1 (11h ago)   12h
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   2 (11h ago)   12h
+
+Create/expose Kiali service
+	terminal --> kubectl expose deployment kiali -n istio-system --type=NodePort --port=20001 --target-port=20001
+
+	# result: service/kiali exposed
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP      	# This is the created Kiali UI service                                                        
+
+Expose Istio Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the Istion UI on http://localhost:20001
+
+Check Jaeger and Zipkin services existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP         # Jaeger UI service                                                           
+
+Expose Jaeger (tracing) service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access Jaeger on http://localhost:8080
+---------------------------------------------------------------------------------------
+
+
+
+
+
+42. Using a browser extension to modify headers
+===============================================
+In the next video we'll be modifying the http headers sent to your browser. There are many extensions available to support this (all with very similar names!), but in the video I use the extension called "ModHeader".
+
+You can find this on the Chrome store here:
+
+https://chrome.google.com/webstore/detail/modheader-modify-http-hea/idgpnmonknjnojddfkpgkljpfnnfcklj
+
+If you want to use a different one, or you're running on a different browser, no problem - but you will need to study the instructions on how to use it!
+
+
+
+43. If you have problems in the next section
+============================================
+You might sometimes have some odd behaviour in your browser in the next videos as we switch from one version or another. This is most likely due to your browser cache.
+
+For example, in reviewing the videos I found that when switching to the new version, I'd get a blank screen. A  "Hard Refresh" cleared this - check your browser's user guide for how to do this.
+
+(For example, Mac Chrome is Command-Shift-R, Windows is Control-F5. There are too many browser/OS combinations to list here, so have a look around - if you're stuck do ask a question!)
+
+
+
+
+44. Header Based Routing
+========================
+
+We will use HTTPMatchRequest for specific version. We can check the options we have to set the match prefix here - https://istio.io/latest/docs/reference/config/networking/virtual-service/#HTTPMatchRequest
+
+We must install browser extension for modifying our headers. Find one in the browser extensions page, install it and configure the header defined below.
+
+Configure custom header
+-----------------------
+We must configure header named 'my-header' with value 'canary'
+
+
+We will match request headers for specific applicaton version routing. 
+For example 
+	- if we have header 'canary' we will be routed to experimental (staging) version of the application
+	- if we have headet different from 'canayy' we will be routed to the original (production) version of the application
+
+
+6-istio-rules.yaml
+-------------------------------------------------
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-configuration     # name of the gateway
+spec:
+  selector:
+    istio: ingressgateway    # use Istio default gateway implementation - label of instio ingressgateway pod in istio-system namespace
+  servers:
+  - port:
+      number: 80
+      name: http             # name of the port
+      protocol: HTTP         # protocol
+    hosts:
+    - "*"   # Domain name of the external website
+---
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp                 # unique name of the virtual service - if not uniques the last will overwrite others
+  namespace: default                    # destination namespace
+spec:
+  hosts:
+    - "*"     # Domain name of the website - not for production
+  gateways:
+    - ingress-gateway-configuration     # name of the gateway
+  http:
+    - match:
+      - headers:                     # IF
+          my-header:                 # custom header
+            exact: canary            # the header value is 'canary' - staging envronment example
+      route:                         # THEN
+      - destination:
+          host: fleetman-webapp      # The Target DNS name - not FQDN
+          subset: experimental       # The subset name defined in the DestinationRule for the staging environment
+    - route:                         # CATCH ALL except canary header for the production environment
+      - destination:
+          host: fleetman-webapp      # The Target DNS name - not FQDN
+          subset: original           # The subset name defined in the DestinationRule for the production environment
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp              # name of the destination rule
+  namespace: default
+spec:
+  host: fleetman-webapp              # The Target DNS name - not FQDN  
+  subsets:
+    - labels:
+        version: original            # find pods with label version: original
+      name: original                 # group found pods with label version: original in this subset
+    - labels:
+        version: experimental        # find pods with label version: experimental
+      name: experimental             # group found pods with label version: experimental in this subset
+-------------------------------------------------
+
+Apply the istion oncifguration
+	terminal --> k apply -f 6-istio-rules.yaml
+
+	# result:
+	gateway.networking.istio.io/ingress-gateway-configuration created
+	virtualservice.networking.istio.io/fleetman-webapp created
+	destinationrule.networking.istio.io/fleetman-webapp created
+
+
+
+Expose the application with port forward
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 31380:80
+
+	Access the application on http://localhost:31380/
+
+If we successfully added our custom header 'my-header' with value 'canary' we should access the new version of the app
+If we remove or haven't set the header we should be accessing the old version of the application
+
+Test the setup with curl commands:
+1. Test with custom header
+	terminal --> curl -s -H "my-header: canary" http://localhost:31380/ | grep title
+
+	# result: <title>Fleet Management Istio Premium Enterprise Edition</title>
+	We have accessed to the staging environment (experimental app) as intended
+
+2. Test without custom header
+	terminal --> curl -s http://localhost:31380/ | grep title
+
+	# result: <title>Fleet Management</title>
+	We have accessed to the production environment (original app) as intended
+
+
+ 
+
+
+
+
+45. Dark Releases for all Microservices
+=======================================
+
+This setup may serve as way of developing services on the production cluster. We may require developers to install custom headers modifiers in their browsers and with additional authentication and authorization they can access and work on live services. 
+
+When we have many microservices, we can deploy upgrated version of some of them and test them privately in real time on the production cluster with the help of istio features - HTTPMatchRequest in this example. If the update/upgrade is successful we need just to adjust the routing of the services.
+
+This is a bit risky approach but it saves resources for full duplicate of the cluster for staging environemnt. This is possible for senior development team that rarely makes mistakes and know well the architecture of the cluster and the product.
+
+The idea is presented in picture dark-release.png
+
+Dark Release Demo
+-----------------
+1. Restore our cluster so that the ':6-palceholder' version of staff management is live (without photo)
+2. We will "Dar Realese" the new and untested :6 version (with photo)
+3. There is a chach !!! 
+	- We need to have configured our application with header propagation explained in Jaeger sessions 24 and 25 in section 6 Telemtry. This means that we need to modify our application to pass information in the headers of the requests sent. In this application this is already done.
+
+
+Generate YAML templates
+-----------------------
+We can generate YAML templates with the help of Kiali UI
+	- Go to Kiali UI - http://localhost:20001/
+	- Go to Services / fleetman-staff-service / Actions / Create Matching Routing
+		- Select Matching tab
+			- headers: my-header / exact: canary
+			- Add Match
+			- We need to see 'Matching selected: headers[my-header] exact canary
+
+		- Select Routs tab
+			- set sliders to 100% 'staff-service-risky-version'
+			- Add Rule
+			- We have created the rule for the header matching
+
+			- set sliders to 100% 'staff-service'
+			- Add Rule
+			- We have created the rule for no matching headers - all others (prod)
+			
+
+		- Select Matching tab
+			- In 'Rule defined' section wWe should see 2 entities
+				1. headers [my-header] exact canary / WS staff-service (0 %)
+								    / WS staff-service-risky-version (100 %)
+
+				2. Any request			    / WS staff-service (100 %)
+								    / WS staff-service-risky-version (0 %)
+
+		- Click 'Create'
+
+Copy the created templates
+	- go to Kiali UI / Istio Config / fleetman-staff-service (VirtualService) / YAML tab
+	- copy the template and pate it into new file
+	
+	- got to Kiali UI / Istio Config / fleetman-staff-service (DestinationRule) / YAML tab
+	- copy the template and pate it into the new file
+		
+
+We will modify these templates by removing unnecessary fields as follow:
+
+7-dark-release-rules.yaml
+-------------------------------------------------
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service              # unique name for virtual service
+  namespace: default                        # destination namespace
+spec:
+  hosts:
+    - fleetman-staff-service                # hostname of the service
+  http:
+    - match:
+        - headers:                          # IF
+            x-my-header:                    # match custom header wiht 'x-' for the header propagation !!! See section 6/25
+              exact: canary                 # with exact header value 
+      route:                                # THEN
+        - destination:                      # route the request to
+            host: fleetman-staff-service    # target service
+            subset: risky                   # with subset name
+    - route:                                # CATCH ALL OTHERS
+        - destination:                      # route the request to
+            host: fleetman-staff-service    # target service
+            subset: safe                    # with subset name
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service              # unique name for destination rule
+  namespace: default                        # destination namespace
+spec:
+  host: fleetman-staff-service              # target service
+  subsets:                                  # define subsets
+    - labels:                               # find pods
+        version: safe                       # with label 'version: safe'
+      name: safe                            # set the found pods with label 'version: safe' in this group
+    - labels:                               # find pods
+        version: risky                      # with label 'version: risky'
+      name: risky                           # set the found pods with label 'version: risky' in this group
+-------------------------------------------------
+
+Delete the created traffic routing objects
+	- Go to Kiali UI - http://localhost:20001/
+	- Go to Services / fleetman-staff-service / Actions / Delete ALL TRaffic Routing
+	- Delete 
+
+Apply the manifest
+	terminal --> k apply -f 7-dark-release-rules.yaml
+
+	# result:
+	virtualservice.networking.istio.io/fleetman-staff-service created
+	destinationrule.networking.istio.io/fleetman-staff-service created
+
+In Kiali UI / Istion Config we can see the created objects but we cannot modify them.
+
+Set custom header
+-----------------
+Now we need to create our custom header in the browser extension. We must have configured our application with header propagation explained in Jaeger sessions 25 in section 6 Telemtry. 
+This means that we need to modify our application to pass the headers of the requests sent from the application pods to the proxy pods so the virtual services knows where to route the request. In this application this is already done. The cusom header we set must start with 'x-'.
+
+We set custom header 'x-my-header' with value 'canary'
+
+
+Expose the apllication with port forwarding
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 31380:80
+
+	Access the application on http://localhost:31380/
+
+On the application we should get the drivers photographs. This mean that we are working with the new version of the application.
+
+If we remove the custom header from our browser extension adn access the application again we should see drivers without photographs
+
+
+
+
+
+
