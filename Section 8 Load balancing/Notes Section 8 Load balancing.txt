@@ -1,0 +1,374 @@
+Section 8 Load balancing
+========================
+
+Section content:
+----------------
+35. Session Affinity ("Stickiness")
+36. What is Consistent Hashing useful for?
+
+
+PREREQUISITES
+-------------
+
+Optional
+--------
+Set alias for kubectl in bash 
+	1. Add the alias: bash --> echo "alias k='kubectl'" >> ~/.bashrc
+	2. Apply it: bash --> source ~/.bashrc
+
+Start the cluster
+	terminal --> minikube start
+
+
+IF WE DONT HAVE RUNNING CLUSTER WITH INSTALLED ISTIO AND EXAMPLE APPLICATION WE NEED TO EXECUTE THE COMMANDS AS FOOLOW:
+---------------------------------------------------------------------------------------
+We will use resources in folder '1-Telemetry'
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-label-default-namespace.yaml
+	- 5-application-no-istio.yaml
+
+Navigate to the resource folder and setup the scenario:
+	Delete the old Minikube cluster
+		terminal --> minikube delete
+
+	Create new Minikube cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+	Test the connection
+		terminal --> kubectl get nodes
+
+		# result:
+		NAME       STATUS   ROLES           AGE   VERSION
+		minikube   Ready    control-plane   10s   v1.35.0
+
+
+	Deply provided resources
+		terminal --> cd 1-Telemetry
+		
+ISNTALL LATEST ISTIO - for Widnows
+--------------------
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH=$PWD/bin:$PATH
+
+Install Istio
+	bash --> istioctl install --set profile=demo -y
+
+Enable sidecar injection on the working namespace (default)
+	bash --> kubectl label namespace default istio-injection=enabled
+
+Verify installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kj4pd     1/1     Running   0          76s
+	istio-ingressgateway-6f868bc4f7-qkmc6   1/1     Running   0          76s
+	istiod-77cb77f5b8-7clw4                 1/1     Running   0          95s
+
+	# all pods must be running
+
+APPLY PROVIDED RESOURCES
+------------------------
+Apply the provided init file - this will modify the installed Istio installation to work with the provided resources
+	bash -->  kubectl apply -f 1-istio-init.yaml
+
+Apply the CRD 2-istio-minikube.yaml
+	bash --> kubectl apply -f 2-istio-minikube.yaml
+
+Test installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   0          5m46s	# grafana runs with prometheus
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   0          5m47s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   0          5m47s	# ingress gateway (incoming traffic)
+	istiod-65cdd474f7-l4wmp                1/1     Running   0          5m47s	# istio deamon
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   0          5m46s	# Jaeger Traces service
+	kiali-594fb85dc8-s68bb                 1/1     Running   0          5m45s	# Kiali UI service
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   0          5m46s	# prometheus works with grafana
+
+
+Apply the CRD 3-kiali-secret.yaml to prevent login requirements to Kiali UI every time
+	bash --> kubectl apply -f 3-kiali-secret.yaml
+
+	# result: secret/kiali created
+
+Apply the CRD 4-label-default-namespace.yaml to label default namespace to be Istio enabled. 
+	bash --> kubectl apply -f 4-label-default-namespace.yaml
+	
+	# result: namespace/default configured
+
+	Confirm labeling
+		bash --> kubectl describe ns default
+
+		# result: Labels:       istio-injection=enabled
+
+	# This will add the additional proxy container is every pod application in the 'default' namespace.
+	# It is important to apply this label to the working namespace before start deploying the application
+
+Deploy the application
+	bash --> kubectl apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator created
+	deployment.apps/position-tracker created
+	deployment.apps/api-gateway created
+	deployment.apps/webapp created
+	deployment.apps/vehicle-telemetry created
+	deployment.apps/staff-service created
+	service/fleetman-webapp created
+	service/fleetman-position-tracker created
+	service/fleetman-api-gateway created
+	service/fleetman-vehicle-telemetry created
+	service/fleetman-staff-service created
+
+List pods to confirm that every pod has 2 containers - app + proxy (istio)
+	terminal --> kubectl get pods
+
+	# result:
+	NAME                                  READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-wxc76          2/2     Running   0          3m14s
+	position-simulator-8449f4c5cc-pnkxd   2/2     Running   0          3m14s
+	position-tracker-676dd958cf-2v9b5     2/2     Running   0          3m14s
+	staff-service-59b8695469-9sfxm        2/2     Running   0          3m14s
+	vehicle-telemetry-64bb8b49-kfv6b      2/2     Running   0          3m14s
+	webapp-cc469458d-rsnpl                2/2     Running   0          3m14s
+
+We can see that all pods has 2 contaires in them. This means that proxy (Istio) container is successfully injected.
+If we forget to label the namespace the proxy containers (sidecar) will not be deployed in the pods. 
+
+Expose the installed application with port forward
+	terminal --> kubectl port-forward svc/fleetman-webapp 30080:80
+		
+	Access the application on http://127.0.0.1:30080/
+
+
+TELEMETRY REQUIREMENTS
+----------------------
+1. Running (Envoy Sidecar) Proxy in each pod we wnat to monitor
+2. Istion control plane need to be running (ie. istiod{istiodaemon}, kiali{UI}, jaeger{tracer}, grafana{present data})
+3. We DON"T need any specific Istio YAML configuration (NO need for VirtualServices, Gateways, etc.)
+
+Confirm requirements
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS      AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   1 (11h ago)   12h
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   1 (11h ago)   12h
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   1 (11h ago)   12h
+	istiod-65cdd474f7-l4wmp                1/1     Running   1 (11h ago)   12h
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   1 (11h ago)   12h
+	kiali-594fb85dc8-s68bb                 1/1     Running   1 (11h ago)   12h
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   2 (11h ago)   12h
+
+Create/expose Kiali service
+	terminal --> kubectl expose deployment kiali -n istio-system --type=NodePort --port=20001 --target-port=20001
+
+	# result: service/kiali exposed
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP      	# This is the created Kiali UI service                                                        
+
+Expose Istio Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the Istion UI on http://localhost:20001
+
+Check Jaeger and Zipkin services existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP         # Jaeger UI service                                                           
+
+Expose Jaeger (tracing) service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access Jaeger on http://localhost:8080
+
+
+Delete previous traffic management configuration
+	terminal --> k delete -f 6-istio-rules.yaml
+
+	# result:
+	virtualservice.networking.istio.io "a-set-of-routing-rules-we-can-call-this-anything" deleted from default namespace
+	destinationrule.networking.istio.io "grouping-rules-for-our-photograph-canary-release" deleted from default namespace
+---------------------------------------------------------------------------------------
+
+
+
+
+35. Session Affinity ("Stickiness")
+===================================
+
+Is it possible to use the weighted destination rules to make a single user "stick" to a specific version (canary)? - NO!
+
+Similar mechanism is Consistent Hashing - Let say that the client IP address is Hashed (ran true a process that return a value that cannot be reversed) and the load balancer is deciding to which Canary Pod to sent the request based on is the hash's last digit is odd or even. This solution depends on the Hashing method and client's IP address but it NOT works for our example and purpose.
+
+Consistent Hashing is presented on picture consistent-hashing.png
+
+We can find information for this issue on Istion Documentation page - https://istio.io/latest/docs/reference/config/networking/destination-rule/#LoadBalancerSettings
+
+Consistent Hashing implementation - 
+https://istio.io/latest/docs/reference/config/networking/destination-rule/#LoadBalancerSettings-ConsistentHashLB
+
+
+
+36. What is Consistent Hashing useful for?
+==========================================
+
+
+CASE 1 - USING USER IP HASHING
+------------------------------
+We can set consisting hashing to route specific user into specific app version (canary) but without weights (istio traffic management).
+
+We use traffic configuration management without weights.
+
+6-istio-rules-stickness-demo.yaml
+-------------------------------------------------
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: a-set-of-routing-rules-we-can-call-this-anything   # "just" a name for this virtualservice
+  namespace: default                                       # target namespace
+spec:
+  hosts:
+    - fleetman-staff-service.default.svc.cluster.local     
+    # FQDN (fully qualified domain name) if we call the service from another namespace (recommended)
+    # or The Service DNS (ie the regular K8S Service) - 'fleetman-staff-service' if we call the service from same namespace 
+  http:
+    - route:
+        - destination:                                                   # first destination - old app version
+            host: fleetman-staff-service.default.svc.cluster.local       # The Target DNS name - FQDN
+            subset: all-staff-service-pods                               # The name defined in the DestinationRule
+            # weight: 100 - no need if we have only one destination
+
+---
+kind: DestinationRule                                           # Defining which pods should be part of each subset
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: grouping-rules-for-our-photograph-canary-release        # This can be anything you like.
+  namespace: default
+spec:
+  host: fleetman-staff-service     # Service - we target all pods behind this service
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        useSourceIp: true
+  subsets:
+    - labels:                      # SELECTOR 1
+        app: staff-service              # find pods with this label - all pods
+      name: all-staff-service-pods      # all pods with the label "app: staff-service"
+-------------------------------------------------
+
+Apply the manifest
+	terminal --> k apply -f 6-istio-rules-stickness-demo.yaml
+
+	# result:
+	virtualservice.networking.istio.io/a-set-of-routing-rules-we-can-call-this-anything created
+	destinationrule.networking.istio.io/grouping-rules-for-our-photograph-canary-release created
+
+Now we will view drivers details only without or with profile picture because our requests are routed only to one app version with the hashed IP - consistent hashing mechanism.
+
+Test the setup with curl command in bash or in the Kiali UI
+	bash --> while true; do curl http://127.0.0.1:30080/api/vehicles/driver/City%20Truck; echo; sleep 0.5; done
+
+	We will see about 100% of the requests return same result - with or without picture depending of our hashed IP.
+
+
+
+CASE 2 - USING HEADER PRPAGATION
+--------------------------------
+To test the other case we need to use http header propagation explained in Jaeger sessions 24 and 25 in section 6 Telemtry. This means that we need to modify our application to pass information in the headers of the requests sent. In this application this is already done and we need only to change the destination rule traffic policy. 
+
+Change the manifest 6-istio-rules-stickness-demo.yaml as follow:
+
+6-istio-rules-stickness-demo.yaml
+-------------------------------------------------
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: a-set-of-routing-rules-we-can-call-this-anything   # "just" a name for this virtualservice
+  namespace: default                                       # target namespace
+spec:
+  hosts:
+    - fleetman-staff-service.default.svc.cluster.local     
+    # FQDN (fully qualified domain name) if we call the service from another namespace (recommended)
+    # or The Service DNS (ie the regular K8S Service) - 'fleetman-staff-service' if we call the service from same namespace 
+  http:
+    - route:
+        - destination:                                                   # first destination - old app version
+            host: fleetman-staff-service.default.svc.cluster.local       # The Target DNS name - FQDN
+            subset: all-staff-service-pods                               # The name defined in the DestinationRule
+            # weight: 100 - no need if we have only one destination
+
+---
+kind: DestinationRule                                           # Defining which pods should be part of each subset
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: grouping-rules-for-our-photograph-canary-release        # This can be anything you like.
+  namespace: default
+spec:
+  host: fleetman-staff-service     # Service - we target all pods behind this service
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        # useSourceIp: true
+        httpHeaderName: "x-myval"                # added consistent hashing with headers
+  subsets:
+    - labels:                      # SELECTOR 1
+        app: staff-service              # find pods with this label - all pods
+      name: all-staff-service-pods      # all pods with the label "app: staff-service"
+-------------------------------------------------
+
+Apply the manifest
+	terminal --> k apply -f 6-istio-rules-stickness-demo.yaml
+
+	# result:
+	virtualservice.networking.istio.io/a-set-of-routing-rules-we-can-call-this-anything unchanged
+	destinationrule.networking.istio.io/grouping-rules-for-our-photograph-canary-release configured
+
+Test the cases with variable the will be hashed and depending on the hashed result we will receive placeholder picture or personal driver picture.
+
+test the service with curl command 
+	terminal --> curl --header "x-myval: 123" http://127.0.0.1:30080/api/vehicles/driver/City%20Truck
+
+	# result: this should give us consistent result with personal pic on every call
+
+change the myval value and check if other result is received
+	terminal --> curl --header "x-myval: 456" http://127.0.0.1:30080/api/vehicles/driver/City%20Truck
+
+	# result: this should give us consistent result with placeholder pic on every call
+
+The reasons we will want to rout same user to the same pods are rare but not excluded - cashing, personal preferences etc.
+
+The role is presented on picture consistent-hashing-usecase.png.
+
+THIS CASES DO NOT WITH WEIGHTS BUT WITH REPLICASETS !!!
+
+
+Delete the configuration
+	terminal --> k delete -f 6-istio-rules-stickness-demo.yaml
+
+	# result:
+	virtualservice.networking.istio.io "a-set-of-routing-rules-we-can-call-this-anything" deleted from default namespace
+	destinationrule.networking.istio.io "grouping-rules-for-our-photograph-canary-release" deleted from default namespace
+
+
