@@ -22,7 +22,7 @@ Start the cluster
 
 IF WE DONT HAVE RUNNING CLUSTER WITH INSTALLED ISTIO AND EXAMPLE APPLICATION WE NEED TO EXECUTE THE COMMANDS AS FOOLOW:
 ---------------------------------------------------------------------------------------
-We will use resources in folder '1-Telemetry'
+We will use resources in folder 'Manifests'
 	- 1-istio-init.yaml
 	- 2-istio-minikube.yaml
 	- 3-kiali-secret.yaml
@@ -294,9 +294,9 @@ Test the setup with curl command in bash or in the Kiali UI
 
 
 
-CASE 2 - USING HEADER PRPAGATION
---------------------------------
-To test the other case we need to use http header propagation explained in Jaeger sessions 24 and 25 in section 6 Telemtry. This means that we need to modify our application to pass information in the headers of the requests sent. In this application this is already done and we need only to change the destination rule traffic policy. 
+CASE 2 - USING HEADER PROPAGATION
+---------------------------------
+To test the other case we need to use http header propagation explained in Jaeger sessions 25 in section 6 Telemtry. This means that we need to modify our application to pass information in the headers of the requests sent. In this application this is already done and we need only to change the destination rule traffic policy. 
 
 Change the manifest 6-istio-rules-stickness-demo.yaml as follow:
 
