@@ -1,0 +1,843 @@
+Section 9 Gateways
+==================
+
+Section content:
+----------------
+37. Reminder for Docker Desktop users - port-forwarding
+38. Why do I need an Ingress Gateway?
+39. Edge Proxies and Gateways
+40. Prefix based routing
+41. Subdomain Routing
+
+
+PREREQUISITES
+-------------
+
+Optional
+--------
+Set alias for kubectl in bash 
+	1. Add the alias: bash --> echo "alias k='kubectl'" >> ~/.bashrc
+	2. Apply it: bash --> source ~/.bashrc
+
+Start the cluster
+	terminal --> minikube start
+
+
+IF WE DONT HAVE RUNNING CLUSTER WITH INSTALLED ISTIO AND EXAMPLE APPLICATION WE NEED TO EXECUTE THE COMMANDS AS FOOLOW:
+---------------------------------------------------------------------------------------
+We will use resources in folder '1-Telemetry'
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-label-default-namespace.yaml
+	- 5-application-no-istio.yaml
+
+Navigate to the resource folder and setup the scenario:
+	Delete the old Minikube cluster
+		terminal --> minikube delete
+
+	Create new Minikube cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+	Test the connection
+		terminal --> kubectl get nodes
+
+		# result:
+		NAME       STATUS   ROLES           AGE   VERSION
+		minikube   Ready    control-plane   10s   v1.35.0
+
+
+	Deply provided resources
+		terminal --> cd 1-Telemetry
+		
+ISNTALL LATEST ISTIO - for Widnows
+--------------------
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH=$PWD/bin:$PATH
+
+Install Istio
+	bash --> istioctl install --set profile=demo -y
+
+Enable sidecar injection on the working namespace (default)
+	bash --> kubectl label namespace default istio-injection=enabled
+
+Verify installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kj4pd     1/1     Running   0          76s
+	istio-ingressgateway-6f868bc4f7-qkmc6   1/1     Running   0          76s
+	istiod-77cb77f5b8-7clw4                 1/1     Running   0          95s
+
+	# all pods must be running
+
+APPLY PROVIDED RESOURCES
+------------------------
+Apply the provided init file - this will modify the installed Istio installation to work with the provided resources
+	bash -->  kubectl apply -f 1-istio-init.yaml
+
+Apply the CRD 2-istio-minikube.yaml
+	bash --> kubectl apply -f 2-istio-minikube.yaml
+
+Test installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   0          5m46s	# grafana runs with prometheus
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   0          5m47s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   0          5m47s	# ingress gateway (incoming traffic)
+	istiod-65cdd474f7-l4wmp                1/1     Running   0          5m47s	# istio deamon
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   0          5m46s	# Jaeger Traces service
+	kiali-594fb85dc8-s68bb                 1/1     Running   0          5m45s	# Kiali UI service
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   0          5m46s	# prometheus works with grafana
+
+
+Apply the CRD 3-kiali-secret.yaml to prevent login requirements to Kiali UI every time
+	bash --> kubectl apply -f 3-kiali-secret.yaml
+
+	# result: secret/kiali created
+
+Apply the CRD 4-label-default-namespace.yaml to label default namespace to be Istio enabled. 
+	bash --> kubectl apply -f 4-label-default-namespace.yaml
+	
+	# result: namespace/default configured
+
+	Confirm labeling
+		bash --> kubectl describe ns default
+
+		# result: Labels:       istio-injection=enabled
+
+	# This will add the additional proxy container is every pod application in the 'default' namespace.
+	# It is important to apply this label to the working namespace before start deploying the application
+
+Deploy the application
+	bash --> kubectl apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator created
+	deployment.apps/position-tracker created
+	deployment.apps/api-gateway created
+	deployment.apps/webapp created
+	deployment.apps/vehicle-telemetry created
+	deployment.apps/staff-service created
+	service/fleetman-webapp created
+	service/fleetman-position-tracker created
+	service/fleetman-api-gateway created
+	service/fleetman-vehicle-telemetry created
+	service/fleetman-staff-service created
+
+List pods to confirm that every pod has 2 containers - app + proxy (istio)
+	terminal --> kubectl get pods
+
+	# result:
+	NAME                                  READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-wxc76          2/2     Running   0          3m14s
+	position-simulator-8449f4c5cc-pnkxd   2/2     Running   0          3m14s
+	position-tracker-676dd958cf-2v9b5     2/2     Running   0          3m14s
+	staff-service-59b8695469-9sfxm        2/2     Running   0          3m14s
+	vehicle-telemetry-64bb8b49-kfv6b      2/2     Running   0          3m14s
+	webapp-cc469458d-rsnpl                2/2     Running   0          3m14s
+
+We can see that all pods has 2 contaires in them. This means that proxy (Istio) container is successfully injected.
+If we forget to label the namespace the proxy containers (sidecar) will not be deployed in the pods. 
+
+
+TELEMETRY REQUIREMENTS
+----------------------
+1. Running (Envoy Sidecar) Proxy in each pod we wnat to monitor
+2. Istion control plane need to be running (ie. istiod{istiodaemon}, kiali{UI}, jaeger{tracer}, grafana{present data})
+3. We DON"T need any specific Istio YAML configuration (NO need for VirtualServices, Gateways, etc.)
+
+Confirm requirements
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS      AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   1 (11h ago)   12h
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   1 (11h ago)   12h
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   1 (11h ago)   12h
+	istiod-65cdd474f7-l4wmp                1/1     Running   1 (11h ago)   12h
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   1 (11h ago)   12h
+	kiali-594fb85dc8-s68bb                 1/1     Running   1 (11h ago)   12h
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   2 (11h ago)   12h
+
+Create/expose Kiali service
+	terminal --> kubectl expose deployment kiali -n istio-system --type=NodePort --port=20001 --target-port=20001
+
+	# result: service/kiali exposed
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP      	# This is the created Kiali UI service                                                        
+
+Expose Istio Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the Istion UI on http://localhost:20001
+
+Check Jaeger and Zipkin services existance
+	terminal --> kubectl get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP         # Jaeger UI service                                                           
+
+Expose Jaeger (tracing) service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access Jaeger on http://localhost:8080
+---------------------------------------------------------------------------------------
+
+
+In this session we remove the old version and deploy only one pod for the new version of the app. Apply the changes made in the file 5-application-no-istio.yaml
+	terminal --> k apply -f 5-application-no-istio.yaml
+
+Check pod configuration
+	terminal --> k get pods
+
+	# result:
+	NAME                                           READY   STATUS    RESTARTS      AGE
+	api-gateway-64d5b6b4cb-wxc76                   2/2     Running   6 (16h ago)   2d15h
+	position-simulator-8449f4c5cc-pnkxd            2/2     Running   6 (16h ago)   2d15h
+	position-tracker-676dd958cf-2v9b5              2/2     Running   6 (16h ago)   2d15h
+	staff-service-risky-version-85d56bcdbf-z7497   2/2     Running   2 (16h ago)   16h	# one app pod only
+	vehicle-telemetry-64bb8b49-kfv6b               2/2     Running   6 (16h ago)   2d15h
+	webapp-d688b487-z6brz                          2/2     Running   0             33s
+
+
+
+
+
+37. Reminder for Docker Desktop users - port-forwarding
+=======================================================
+Reminder for Docker Desktop users - port-forwarding
+
+In this section we're going to switch from accessing the webapp directly, and instead we will use an Istio service called the "ingress gateway".
+
+I've set this up in the code to be a service which uses a NodePort on 31380.
+
+If in previous sessions you were relying on the port-forward trick to access the service, then you will need to repeat this trick for the ingress gateway.
+
+Note that this works around a bug in Docker Desktop that only affects some users. Please do try using "localhost:31380" first, and if you cannot connect then try this workaround.
+
+Your new command will look like this:
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 31380:80
+
+Leave this command running and now "localhost:31380" should be accessible.
+
+
+
+
+38. Why do I need an Ingress Gateway?
+=====================================
+
+Canary Requirement
+	1. We have a new experimental front end, tagged ":6-experimental"
+	2. Requirement: deploy this as 10% canary release
+
+We manage the file 5-application-no-istio.yaml and add label 'version: original' to the deployment called 'webapp' starting at line 70. We will also create a duplicate of this deployment and set a unique name, label 'version: experimental' and different image used. So copy and paste the deplyment below the existing one.
+
+5-application-no-istio.yaml
+-------------------------------------------------
+...
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+spec:
+  selector:
+    matchLabels:
+      app: webapp
+  replicas: 1
+  template:                        # template for the pods
+    metadata:
+      labels:
+        app: webapp
+        version: original          # added label 'version: original'
+    spec:
+      containers:
+      - name: webapp
+        image: richardchesterwood/istio-fleetman-webapp-angular:6
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: production-microservice
+        imagePullPolicy: Always
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-experimental                    # unique name
+spec:
+  selector:
+    matchLabels:
+      app: webapp
+  replicas: 1
+  template:                                    # template for the pods
+    metadata:
+      labels:
+        app: webapp
+        version: experimental                  # different label 
+    spec:
+      containers:
+      - name: webapp
+        image: richardchesterwood/istio-fleetman-webapp-angular:6-experimental      # experimental image
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: production-microservice
+        imagePullPolicy: Always
+---
+-------------------------------------------------
+
+Apply the changes
+	terminal --> k apply -f 5-application-no-istio.yaml
+
+Confirm changes are made
+	terminal --> k get pods
+	
+	# result:
+	NAME                                           READY   STATUS    RESTARTS      AGE
+	api-gateway-64d5b6b4cb-wxc76                   2/2     Running   6 (16h ago)   2d15h
+	position-simulator-8449f4c5cc-pnkxd            2/2     Running   6 (16h ago)   2d15h
+	position-tracker-676dd958cf-2v9b5              2/2     Running   6 (16h ago)   2d15h
+	staff-service-risky-version-85d56bcdbf-z7497   2/2     Running   2 (16h ago)   16h
+	vehicle-telemetry-64bb8b49-kfv6b               2/2     Running   6 (16h ago)   2d15h
+	webapp-d688b487-z6brz                          2/2     Running   0             11m	# old webapp
+	webapp-experimental-78667747df-xq849           2/2     Running   0             14s	# new webapp
+
+
+To connect to both version of the app we need to use the NodePort service. If we port forward the webapp service we will be only connected to one of the pods. We need to use minikube mechanism to access this NodePort and be able to receive responses from both pods (both app versions)
+
+Start the app with minikube command
+	terminal --> minikube service fleetman-webapp
+
+	# result:
+	│ default   │ fleetman-webapp │             │ http://127.0.0.1:63005 │		# access the app with this IP
+
+	Access the app on http://127.0.0.1:63005
+
+On refresh we should get different applications one of which is with red banner (experimental version)
+	- If we can't access one of the versions we need to hard refresh the browser 	
+		- Ctrl + Shift + R
+		or
+		- Ctrl + F5
+
+
+We can confirm Nodeport service
+	terminal --> k get svc
+	
+	# result:
+	NAME                         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+	fleetman-api-gateway         ClusterIP   10.98.18.235    <none>        8080/TCP       2d15h
+	fleetman-position-tracker    ClusterIP   10.96.56.203    <none>        8080/TCP       2d15h
+	fleetman-staff-service       ClusterIP   10.96.165.49    <none>        8080/TCP       2d15h
+	fleetman-vehicle-telemetry   ClusterIP   10.109.37.124   <none>        8080/TCP       2d15h
+	fleetman-webapp              NodePort    10.110.101.24   <none>        80:30080/TCP   2d15h	# target service
+	kubernetes                   ClusterIP   10.96.0.1       <none>        443/TCP        2d16h
+
+
+In Kiali UI (http://localhost:20001/) / Graph / Versioned app graph , we can see webapp versions. We can check 'Service Nodes' in Display menu to visualize and the service for the webapp versions.
+
+
+Generate istio VirtualService and DestinationRule manifest templates
+--------------------------------------------------------------------
+Kiali UI / Services / fleetman-webapp / Action / Create Weighted Routing / Set 90% - 10% /Create
+ 
+We can now acces Istion Config / VirtualService or DestinationRule / YAML and copy the manifests templates.
+
+Paste the templates and remove not used fields. The result is below:
+
+6-istio-rules.yaml
+-------------------------------------------------
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  hosts:
+    - fleetman-webapp.default.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: fleetman-webapp.default.svc.cluster.local
+            subset: original
+          weight: 90
+        - destination:
+            host: fleetman-webapp.default.svc.cluster.local
+            subset: experimental
+          weight: 10
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  host: fleetman-webapp.default.svc.cluster.local
+  subsets:
+    - labels:
+        version: original
+      name: original
+    - labels:
+        version: experimental
+      name: experimental
+-------------------------------------------------
+
+Delete the created Weight Routes
+--------------------------------
+Kiali UI / Services / fleetman-webapp / Action / Delete ALL Traffic Routing / Delete
+
+
+Apply the our custom manifest
+	terminal --> k apply -f 6-istio-rules.yaml
+
+	# result:
+	virtualservice.networking.istio.io/fleetman-webapp created
+	estinationrule.networking.istio.io/fleetman-webapp created
+
+Access the app on http://127.0.0.1:63005
+	- We can see that 90%/10% is not working
+	- We have more like 50%/50% between old and new vapp version
+
+Test the configuration
+	terminal --> for i in {1..50}; do curl -s http://127.0.0.1:63005 | grep -i "version\|experimental\|title"; done
+
+	# result: We can see that the result is appr. 50/50 fr both app versions !
+
+THE WEIGHTS DO NOT WORK !!!
+
+
+
+
+39. Edge Proxies and Gateways
+=============================
+
+Why the weights do not work? - Because we are accessing the direct webapp service and we do not go true any proxy.
+
+The solution is "Edge Proxy" or Istio Gateway. This is Proxy that is reached first from the client side. It allows us to configure weights (istion yaml config) and manage client requests/traffic.
+
+The role is presented in picture istio-gateway.png
+
+This gateway pod is already installed by instio and running in the istio-system namespace
+	terminal --> k get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS        AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   3 (19h ago)     2d18h
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   3 (19h ago)     2d18h
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   3 (19h ago)     2d18h	
+	istiod-65cdd474f7-l4wmp                1/1     Running   3 (19h ago)     2d18h   # instio ingressgateway pod
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   4 (6h43m ago)   2d18h
+	kiali-594fb85dc8-s68bb                 1/1     Running   4 (19h ago)     2d18h
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   6 (19h ago)     2d18h
+
+We have also running istio ingress gateway service
+	terminal -> k get svc -n istio-system
+
+# result:
+NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)
+grafana                NodePort    10.102.89.82     <none>        3000:31002/TCP
+istio-egressgateway    ClusterIP   10.105.212.49    <none>        80/TCP,443/TCP
+istio-ingressgateway   NodePort    10.100.233.83    <none>        15021:32300/TCP,80:31380/TCP,443:32589/TCP,31400:31000/TCP,15443:31988/TCP				# target service
+istiod                 ClusterIP   10.110.254.210   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP
+jaeger-collector       ClusterIP   10.103.147.126   <none>        14268/TCP,14250/TCP
+kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP
+prometheus             ClusterIP   10.100.141.126   <none>        9090/TCP
+tracing                NodePort    10.99.252.72     <none>        80:31001/TCP
+zipkin                 ClusterIP   10.99.133.244    <none>        9411/TCP    
+
+
+We can configure this Istio Ingress Gateway to allow incoming traffic.
+
+We can find detailed information in Istio documentation - https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-control/#configuring-ingress-using-a-gateway
+
+
+We will add Istio gateway API configuration in our weights configuration manifest and set it in the virtual service.
+
+6-istio-rules.yaml
+-------------------------------------------------
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-configuration      # name of the gateway
+spec:
+  selector:
+    istio: ingressgateway     # use Istio default gateway implementation - label of instio ingressgateway pod in istio-system namespace
+  servers:
+  - port:
+      number: 80              # port number
+      name: http              # name of the port
+      protocol: HTTP          # protocol 
+    hosts:
+    - "*"                     # Use the real Domain name of the external website in production
+---
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  hosts:
+    - "*"                      # Add the domain name of the gateway, Use the real Domain name of the external website in production
+  gateways: 
+    - ingress-gateway-configuration                           # name of the gateway
+  http:
+    - route:
+        - destination:
+            host: fleetman-webapp                             # The Target DNS name - not FQDN
+            subset: original
+          weight: 90
+        - destination:
+            host: fleetman-webapp                             # The Target DNS name - not FQDN
+            subset: experimental
+          weight: 10
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  host: fleetman-webapp.default.svc.cluster.local
+  subsets:
+    - labels:
+        version: original
+      name: original
+    - labels:
+        version: experimental
+      name: experimental
+-------------------------------------------------
+
+Apply the our custom manifest
+	terminal --> k apply -f 6-istio-rules.yaml
+
+	# result:
+	gateway.networking.istio.io/ingress-gateway-configuration created	# created gateway
+	virtualservice.networking.istio.io/fleetman-webapp configured		# configured virtual service
+	destinationrule.networking.istio.io/fleetman-webapp unchanged
+
+
+We also need to prevent external access to our webapp service
+
+List services
+	terminal --> k get svc
+
+	# result:
+	NAME                         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+	fleetman-api-gateway         ClusterIP   10.98.18.235    <none>        8080/TCP       2d19h
+	fleetman-position-tracker    ClusterIP   10.96.56.203    <none>        8080/TCP       2d19h
+	fleetman-staff-service       ClusterIP   10.96.165.49    <none>        8080/TCP       2d19h
+	fleetman-vehicle-telemetry   ClusterIP   10.109.37.124   <none>        8080/TCP       2d19h
+	fleetman-webapp              NodePort    10.110.101.24   <none>        80:30080/TCP   2d19h	# target service
+	kubernetes                   ClusterIP   10.96.0.1       <none>        443/TCP        2d19h
+
+
+Modify the service in the application manifest 5-application-no-istio.yaml from line 188 to line 202
+	
+5-application-no-istio.yaml
+-------------------------------------------------
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleetman-webapp
+spec:
+  # This defines which pods are going to be represented by this Service
+  # The service becomes a network endpoint for either other services
+  # or maybe external users to connect to (eg browser)
+  selector:
+    app: webapp
+  ports:
+    - name: http
+      port: 80
+      # nodePort: 30080				# removed 'nodePort: 30080'
+  type: ClusterIP                               # changed from NodePort to ClusterIP
+---
+-------------------------------------------------
+
+Apply changes
+	terminal --> k apply -f 5-application-no-istio.yaml
+
+	# result:
+	deployment.apps/position-simulator unchanged
+	deployment.apps/position-tracker unchanged
+	deployment.apps/api-gateway unchanged
+	deployment.apps/webapp unchanged
+	deployment.apps/webapp-experimental unchanged
+	deployment.apps/vehicle-telemetry unchanged
+	deployment.apps/staff-service unchanged
+	deployment.apps/staff-service-risky-version unchanged
+	service/fleetman-webapp configured			# configured application service
+	service/fleetman-position-tracker unchanged
+	service/fleetman-api-gateway unchanged
+	service/fleetman-vehicle-telemetry unchanged
+	service/fleetman-staff-service unchanged
+
+
+Now the access is possible only true the gateway proxy pod.
+
+Expose the gateway with port forwarding one of the services ports
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 31380:80
+
+	Access the application on http://localhost:31380/
+
+We can now test the 90%/10% ration with curl command
+	bash --> for i in {1..50}; do curl -s http://127.0.0.1:31380 | grep -i "version\|experimental\|title"; done
+
+	# result: Now we should see 90% old version and 10% new version of the application
+	
+
+In Kiali UI / Graph / Versioned app graph, we can see the improved graph with istio-ingressgateway visualization
+
+
+
+40. Prefix based routing
+========================
+
+We can set a rout that serve different application version with prefixed path. This configuration is made in the Istio Virtual Service and EXCLUDE WEIGHTS.
+
+We can see detailed Istio documentation - https://istio.io/latest/docs/reference/config/networking/virtual-service/#Destination
+
+We will configure separate istio manifest for this example called 6-istio-rules-prefix.yaml. No weights included!
+
+6-istio-rules-prefix.yaml
+-------------------------------------------------
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-configuration
+spec:
+  selector:
+    istio: ingressgateway     # use Istio default gateway implementation - label of instio ingressgateway pod in istio-system namespace
+  servers:
+  - port:
+      number: 80              # port number
+      name: http              # name of the port
+      protocol: HTTP          # protocol 
+    hosts:
+    - "*" # Use the real Domain name of the external website in production
+---
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  hosts:
+    - "*"    # Add the domain name of the gateway, Use the real Domain name of the external website in production
+  gateways:
+    - ingress-gateway-configuration
+  http:
+    - match:
+      - uri:                                            # IF
+          prefix: "/experimental"                       # if request is coming with this prefix
+      - uri:                                            # OR                                        
+          prefix: "/canary"                             # if request is coming with this prefix
+      route:                                            # THEN
+      - destination:                                    # route the request to
+          host: fleetman-webapp                         # The Target DNS name
+          subset: experimental                          # The subset name defined in the DestinationRule
+    - match:                                            # IF
+      - uri:
+          prefix: "/"                                   # if request is coming with this prefix
+      route:                                            # THEN
+      - destination:                                    # route the request to
+          host: fleetman-webapp                         # The Target DNS name
+          subset: original                              # The subset name defined in the DestinationRule
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp
+  namespace: default
+spec:
+  host: fleetman-webapp
+  subsets:
+    - labels:
+        version: original
+      name: original
+    - labels:
+        version: experimental
+      name: experimental
+-------------------------------------------------
+
+Apply the file over the last example configs
+	terminal --> k apply -f 6-istio-rules-prefix.yaml
+
+	# result:
+	gateway.networking.istio.io/ingress-gateway-configuration unchanged
+	virtualservice.networking.istio.io/fleetman-webapp configured
+	destinationrule.networking.istio.io/fleetman-webapp configured
+
+
+
+Test the separation with prefixes with curl commands:
+
+1. Test the address with '/experimental' and '/canary' prefixes
+	terminal --> curl -s http://localhost:31380/experimental | grep title
+	terminal --> curl -s http://localhost:31380/canary | grep title
+
+	# result: <title>Fleet Management Istio Premium Enterprise Edition</title>
+
+2. Test the base address with no ('/') prefix
+	terminal --> curl -s http://localhost:31380 | grep title
+
+	# result: <title>Fleet Management</title>
+
+
+NOTES
+-----
+It is not recommended to use prefixes to deploy different versions of applications.
+
+The most used options for deploying application versions is subdomains that we will go over in the next session.
+
+It is also common to use HTTPMatchRequest for specific version. We can check the options we have to set the match prefix here - https://istio.io/latest/docs/reference/config/networking/virtual-service/#HTTPMatchRequest
+
+
+Troubleshooting
+---------------
+If we make specific YAML error, it still may apply without error and create confusion. We have to be careful with the YAML modification is this files. It is good to follow the official Istio ocumentation - https://istio.io/latest/docs/reference/config/networking/virtual-service/
+
+
+
+
+
+
+
+
+
+41. Subdomain Routing
+=====================
+
+Configure minikube host address to our Windows OS:
+1. Find minikube IP address
+	terminal --> minikube ip	# result: 192.168.49.2
+
+Add host address to Windows host list
+	- Open PowerShell as Admin
+		terminal --> notepad C:\Windows\System32\drivers\etc\hosts
+		- add '192.168.49.2 fleetman.com.localhost'
+		- add '192.168.49.2 experimental.fleetman.com.localhost'
+		- save the file and exit
+
+Add host address to Linux host list
+	terminal --> sudo vim /etc/hosts
+	- add '192.168.49.2 fleetman.com.localhost'
+	- add '192.168.49.2 experimental.fleetman.com.localhost'
+	- save changes and exit - escape, :wq!, enter
+
+
+
+We will create istio configuration manifest called 6-istio-rules-subdomain.yaml
+
+
+
+6-istio-rules-subdomain.yaml
+-------------------------------------------------
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: ingress-gateway-configuration       # name of the gateway
+spec:
+  selector:
+    istio: ingressgateway                   # use Istio default gateway implementation - label of instio ingressgateway pod in istio-system namespace
+  servers:
+  - port:
+      number: 80
+      name: http                            # name of the port
+      protocol: HTTP                        # protocol
+    hosts:
+    - "*.fleetman.com"                      # Domain name of the website with subdomains *. - all subdomains
+    - "fleetman.com"                        # Main domain name of the website - must be configured separatelly
+---
+kind: VirtualService                        # virtual service for main domain name 'fleetman.com'
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp                    # original version of the app
+  namespace: default
+spec:
+  hosts:                                   # which incoming host are we applying the proxy rules to???
+    - "fleetman.com"                       # Domain name of the website
+  gateways:
+    - ingress-gateway-configuration        # name of the gateway
+  http:
+    - route:
+      - destination:
+          host: fleetman-webapp            # The Target DNS name - not FQDN
+          subset: original                 # The subset name defined in the DestinationRule
+---
+kind: VirtualService                       # virtual service for subdomain name 'experimental.fleetman.com'
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp-experiment        # unique name of the virtual service - if not uniques the last will overwrite others
+  namespace: default                      # destination namespace
+spec:
+  hosts:                                  # which incoming host are we applying the proxy rules to???
+    - "experimental.fleetman.com"         # Domain name of the website
+  gateways:                               # gateway section
+    - ingress-gateway-configuration       # name of the gateway
+  http:
+      - route:
+        - destination:
+            host: fleetman-webapp         # The Target DNS name - not FQDN
+            subset: experimental          # The subset name defined in the DestinationRule
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-webapp                   # name of the destination rule
+  namespace: default
+spec:
+  host: fleetman-webapp                   # The Target DNS name - not FQDN
+  subsets:
+    - labels:
+        version: original                 # find pods with label version: original
+      name: original                      # group found pods with label version: original in this subset
+    - labels:
+        version: experimental             # find pods with label version: experimental
+      name: experimental                  # group found pods with label version: experimental in this subset
+-------------------------------------------------
+
+Apply the manifest overwriting the previous setup
+	terminal --> k apply -f 6-istio-rules-subdomain.yaml
+
+	# result:
+	gateway.networking.istio.io/ingress-gateway-configuration configured
+	virtualservice.networking.istio.io/fleetman-webapp configured
+	virtualservice.networking.istio.io/fleetman-webapp-experiment created
+	destinationrule.networking.istio.io/fleetman-webapp unchanged
+
+
+Expose the application with port forwarding
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 80:80
+
+	HARD REFRESH THE BROWSER: CTRL + SHIFT + R	!!!!
+
+	Access the old version of the application on http://localhost:fleetman.com/
+	Access the new version of the application on http://experimental.localhost:fleetman.com/
+
+
+
+
+
+
+
+
+
+
+
