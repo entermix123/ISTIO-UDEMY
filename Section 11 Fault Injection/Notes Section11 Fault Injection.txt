@@ -1,0 +1,296 @@
+Section 11 Fault Injection
+==========================
+
+Section content:
+----------------
+46. Fault Injection
+
+
+
+PREREQUISITES
+-------------
+
+Optional
+--------
+Set alias for kubectl in bash 
+	1. Add the alias: bash --> echo "alias k='kubectl'" >> ~/.bashrc
+	2. Apply it: bash --> source ~/.bashrc
+
+
+INSTALL THE SETUP WITH THE PROVIDED MANIFESTS
+---------------------------------------------------------------------------------------
+We will use resources in folder 'Manifests'
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-label-default-namespace.yaml
+	- 5-application-no-istio.yaml
+	- 6-istio-rules.yaml
+
+Navigate to the resource folder and setup the scenario:
+	Delete the old Minikube cluster
+		terminal --> minikube delete
+
+	Create new Minikube cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+	Test the connection
+		terminal --> kubectl get nodes
+
+		# result:
+		NAME       STATUS   ROLES           AGE   VERSION
+		minikube   Ready    control-plane   10s   v1.35.0
+
+
+	Deply provided resources
+		terminal --> cd 1-Telemetry
+		
+ISNTALL LATEST ISTIO - for Widnows
+--------------------
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH=$PWD/bin:$PATH
+
+Install Istio
+	bash --> istioctl install --set profile=demo -y
+
+Enable sidecar injection on the working namespace (default)
+	bash --> kubectl label namespace default istio-injection=enabled
+
+Verify installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kj4pd     1/1     Running   0          76s
+	istio-ingressgateway-6f868bc4f7-qkmc6   1/1     Running   0          76s
+	istiod-77cb77f5b8-7clw4                 1/1     Running   0          95s
+
+	# all pods must be running
+
+APPLY PROVIDED RESOURCES
+------------------------
+Apply the provided init file - this will modify the installed Istio installation to work with the provided resources
+	bash -->  kubectl apply -f 1-istio-init.yaml
+
+Apply the CRD 2-istio-minikube.yaml
+	bash --> kubectl apply -f 2-istio-minikube.yaml
+
+Test installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   0          5m46s	# grafana runs with prometheus
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   0          5m47s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   0          5m47s	# ingress gateway (incoming traffic)
+	istiod-65cdd474f7-l4wmp                1/1     Running   0          5m47s	# istio deamon
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   0          5m46s	# Jaeger Traces service
+	kiali-594fb85dc8-s68bb                 1/1     Running   0          5m45s	# Kiali UI service
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   0          5m46s	# prometheus works with grafana
+
+
+Apply the CRD 3-kiali-secret.yaml to prevent login requirements to Kiali UI every time
+	bash --> kubectl apply -f 3-kiali-secret.yaml
+
+	# result: secret/kiali created
+
+Apply the CRD 4-label-default-namespace.yaml to label default namespace to be Istio enabled. 
+	bash --> kubectl apply -f 4-label-default-namespace.yaml
+	
+	# result: namespace/default configured
+
+	Confirm labeling
+		bash --> kubectl describe ns default
+
+		# result: Labels:       istio-injection=enabled
+
+	# This will add the additional proxy container is every pod application in the 'default' namespace.
+	# It is important to apply this label to the working namespace before start deploying the application
+
+Deploy the application
+	bash --> kubectl apply -f 5-application-no-istio.yaml
+
+
+Create/expose Kiali service
+	terminal --> kubectl expose deployment kiali -n istio-system --type=NodePort --port=20001 --target-port=20001
+
+	# result: service/kiali exposed
+
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+	# result:
+	NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+	kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP  # Created Kiali UI service                                                        
+
+
+Expose Istio Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the KIali UI on http://localhost:20001                                                    
+
+Expose Jaeger (tracing) service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access Jaeger on http://localhost:8080
+
+Apply the istion confguration
+	terminal --> k apply -f 6-istio-rules.yaml
+
+Expose the application with port forward
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 31380:80
+
+	Access the application on http://localhost:31380/
+---------------------------------------------------------------------------------------
+
+
+
+
+46. Fault Injection
+===================
+
+We can use Istio Fault injection features to send faults and make specific service slow by adding delays and test the behavior of the system. The goal is to test the robust design of our system. 
+We should be sure that when something goes wrong the system does NOT stop and continue working with isolated problematic services.
+
+We can test falure by creating separate pods with included faults but istio provide us with this features implemented more easily.
+
+We can configure fault injection with Istio VirtualService object.
+
+We can generate VirtualService with Fault injection with Kiali
+	- Go to Kiali UI / Services / fleetman-vehicle-telemetry / Actions / Suspend Traffic / Create
+	- Go to Kiali UI / Services / fleetman-vehicle-telemetry (VirtualSerice) / YAML / Copy the template
+	# DestinationRule is also created but its blank and we will not use it
+
+Delete the suspension Service 
+	- Go to Kiali UI / Services / fleetman-vehicle-telemetry / Actions / Delete ALL Traffic Routing
+
+
+We can use the template and configure it for our needs.
+
+8-fault-injection.yaml
+-------------------------------------------------
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-vehicle-telemetry                     # unique name of the virtual service
+  namespace: default                                   # destination namespace
+spec:
+  hosts:
+    - fleetman-vehicle-telemetry                       # target service
+  http:                                                # HTTP routes
+    - fault:                                           # fault injection
+        abort:                                         # abort injection
+          httpStatus: 503                              # sent HTTP status
+          percentage:                                  # percentage of requests to abort
+            value: 100                                 # precentage value
+      route:                                           # HTTP route
+        - destination:                                 # target destination
+            host: fleetman-vehicle-telemetry           # target service
+-------------------------------------------------
+
+Apply the fault injection
+	terminal --> k apply -f 8-fault-injection.yaml
+
+	# result: virtualservice.networking.istio.io/fleetman-vehicle-telemetry created
+
+We can now see that the system is continue working with degraded functionality.
+
+We can configure 2 fault injections (Delay and Abort). We can see fault injection cases in the Istio Doceumntation - https://istio.io/latest/docs/reference/config/networking/virtual-service/#HTTPFaultInjection
+
+
+We will configure delay rule in case of 'Dark Release' - service developed on the live cluster accessable only by developers.
+	- This scenario requires browser extension for adding custom header 'x-my-header:' with value 'canary' 
+	- This header will allow us to access the restricted service
+	- We can use different extensions for this purpose
+	- All other traffic (users without custom header will be served working application)
+
+7-dark-release-rules.yaml
+-------------------------------------------------
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service
+  namespace: default
+spec:
+  hosts:
+    - fleetman-staff-service
+  http:
+    - match:                                  # HTTP match rule
+        - headers:                            # match headers
+            x-my-header:                      # match custom header with headers propagation
+              exact: canary                   # with exact header value
+      fault:                                  # added fault rule
+          delay:                              # delay injection
+            percentage: 
+              value: 100.0                      # percentage of requests to delay  
+            fixedDelay: 10s                     # fixed delay
+
+      #   abort:                              # abort injection
+      #     percentage:                         # percentage of requests to abort
+      #       value: 100.0                      # precentage value
+      #     httpStatus: 418                     # BE CAREFUL WITH INDENTATION!
+      
+      route:                                  # HTTP route for the fault - target app version
+        - destination:                        # destination
+            host: fleetman-staff-service      # target service
+            subset: risky                     # target subset
+    - route:
+        - destination:
+            host: fleetman-staff-service
+            subset: safe
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service
+  namespace: default
+spec:
+  host: fleetman-staff-service              # target service
+  subsets:                                  # define subsets
+    - labels:                               # find pods
+        version: safe                       # with label 'version: safe'
+      name: safe                            # set the found pods with label 'version: safe' in this group
+    - labels:                               # find pods
+        version: risky                      # with label 'version: risky'
+      name: risky                           # set the found pods with label 'version: risky' in this group
+-------------------------------------------------
+      
+
+Apply the delay injection
+	terminal --> k apply -f 7-dark-release-rules.yaml
+
+Expose the application if not already
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 31380:80
+
+	# Browser Hard refresh - Ctrl + Shift + R
+
+We can now access the application as regular user on http://localhost:31380/
+
+Try both cases
+	1. Use the app as a regular uset (no custom header configured)
+		- We should see drivers profile picture with placeholder only.
+
+	2. Use the application as a developer (with custom header configured - 'x-my-header:' with value 'canary')
+		- We should see drivers with profile picture after the configured delay of 10s.
+
+
+Fault injection in production clusters is not a good idea !!! It is used to test if the system is robust as design intended.
+
+
+
+
+
+
+
+
+
