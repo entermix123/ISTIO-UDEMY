@@ -1,0 +1,49 @@
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service
+  namespace: default
+spec:
+  hosts:
+    - fleetman-staff-service
+  http:
+    - match:                                  # HTTP match rule
+        - headers:                            # match headers
+            x-my-header:                      # match custom header with headers propagation
+              exact: canary                   # with exact header value
+      fault:                                  # added fault rule
+          delay:                              # delay injection
+            percentage: 
+              value: 100.0                      # percentage of requests to delay  
+            fixedDelay: 10s                     # fixed delay
+
+      #   abort:                              # abort injection
+      #     percentage:                         # percentage of requests to abort
+      #       value: 100.0                      # precentage value
+      #     httpStatus: 418                     # BE CAREFUL WITH INDENTATION!
+      
+      route:                                  # HTTP route for the fault - target app version
+        - destination:                        # destination
+            host: fleetman-staff-service      # target service
+            subset: risky                     # target subset
+    - route:
+        - destination:
+            host: fleetman-staff-service
+            subset: safe
+---
+kind: DestinationRule
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-staff-service
+  namespace: default
+spec:
+  host: fleetman-staff-service              # target service
+  subsets:                                  # define subsets
+    - labels:                               # find pods
+        version: safe                       # with label 'version: safe'
+      name: safe                            # set the found pods with label 'version: safe' in this group
+    - labels:                               # find pods
+        version: risky                      # with label 'version: risky'
+      name: risky                           # set the found pods with label 'version: risky' in this group
+
+      

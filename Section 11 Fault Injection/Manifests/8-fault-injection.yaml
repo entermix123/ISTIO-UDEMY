@@ -1,0 +1,17 @@
+kind: VirtualService
+apiVersion: networking.istio.io/v1alpha3
+metadata:
+  name: fleetman-vehicle-telemetry                     # unique name of the virtual service
+  namespace: default                                   # destination namespace
+spec:
+  hosts:
+    - fleetman-vehicle-telemetry                       # target service
+  http:                                                # HTTP routes
+    - fault:                                           # fault injection
+        abort:                                         # abort injection
+          httpStatus: 503                              # sent HTTP status
+          percentage:                                  # percentage of requests to abort
+            value: 10                                  # precentage value
+      route:                                           # HTTP route
+        - destination:                                 # target destination
+            host: fleetman-vehicle-telemetry           # target service
