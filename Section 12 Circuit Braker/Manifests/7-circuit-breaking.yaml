@@ -1,0 +1,13 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: circuit-breaker-for-the-entire-default-namespace
+spec:
+  host: "fleetman-staff-service.default.svc.cluster.local"   # Use FQDM (fully qulified domain name) for the k8s service
+
+  trafficPolicy:
+    outlierDetection:                      # Circuit Breakers HAVE TO BE SWITCHED ON
+      maxEjectionPercent: 100              # eject 100% of the falut pods
+      consecutive5xxErrors: 2              # 2 consecutive 5xx errors
+      interval: 10s                        # errors must occur in 10 seconds period
+      baseEjectionTime: 30s                # eject the fault source for 30 seconds
