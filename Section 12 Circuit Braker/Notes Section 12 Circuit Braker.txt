@@ -1,0 +1,300 @@
+Section 12 Circuit Braker
+=========================
+
+Section content:
+----------------
+47. Cascading Failures
+48. Configuring Outlier Detection
+49. Testing Circuit Breakers
+
+
+
+PREREQUISITES
+-------------
+
+Optional
+--------
+Set alias for kubectl in bash 
+	1. Add the alias: bash --> echo "alias k='kubectl'" >> ~/.bashrc
+	2. Apply it: bash --> source ~/.bashrc
+
+
+INSTALL THE SETUP WITH THE PROVIDED MANIFESTS
+---------------------------------------------------------------------------------------
+We will use resources in folder 'Manifests'
+	- 1-istio-init.yaml
+	- 2-istio-minikube.yaml
+	- 3-kiali-secret.yaml
+	- 4-label-default-namespace.yaml
+	- 5-application-no-istio.yaml
+	- 6-istio-rules.yaml
+
+Navigate to the resource folder and setup the scenario:
+	Delete the old Minikube cluster
+		terminal --> minikube delete
+
+	Create new Minikube cluster
+		terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+	Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+	Test the connection
+		terminal --> kubectl get nodes
+
+		# result:
+		NAME       STATUS   ROLES           AGE   VERSION
+		minikube   Ready    control-plane   10s   v1.35.0
+
+
+	Deply provided resources
+		terminal --> cd 1-Telemetry
+		
+ISNTALL LATEST ISTIO - for Widnows
+--------------------
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH=$PWD/bin:$PATH
+
+Install Istio
+	bash --> istioctl install --set profile=demo -y
+
+Enable sidecar injection on the working namespace (default)
+	bash --> kubectl label namespace default istio-injection=enabled
+
+Verify installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kj4pd     1/1     Running   0          76s
+	istio-ingressgateway-6f868bc4f7-qkmc6   1/1     Running   0          76s
+	istiod-77cb77f5b8-7clw4                 1/1     Running   0          95s
+
+	# all pods must be running
+
+APPLY PROVIDED RESOURCES
+------------------------
+Apply the provided init file - this will modify the installed Istio installation to work with the provided resources
+	bash -->  kubectl apply -f 1-istio-init.yaml
+
+Apply the CRD 2-istio-minikube.yaml
+	bash --> kubectl apply -f 2-istio-minikube.yaml
+
+Test installation
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-f7kdf               1/1     Running   0          5m46s	# grafana runs with prometheus
+	istio-egressgateway-5898456ddf-jmqgv   1/1     Running   0          5m47s	# egress gateway (outgoing traffic)
+	istio-ingressgateway-7d95dbfcc-b89w4   1/1     Running   0          5m47s	# ingress gateway (incoming traffic)
+	istiod-65cdd474f7-l4wmp                1/1     Running   0          5m47s	# istio deamon
+	jaeger-76d7cfcfdb-b2xx9                1/1     Running   0          5m46s	# Jaeger Traces service
+	kiali-594fb85dc8-s68bb                 1/1     Running   0          5m45s	# Kiali UI service
+	prometheus-65bdbcd97f-ntvnw            2/2     Running   0          5m46s	# prometheus works with grafana
+
+
+Apply the CRD 3-kiali-secret.yaml to prevent login requirements to Kiali UI every time
+	bash --> kubectl apply -f 3-kiali-secret.yaml
+
+	# result: secret/kiali created
+
+Apply the CRD 4-label-default-namespace.yaml to label default namespace to be Istio enabled. 
+	bash --> kubectl apply -f 4-label-default-namespace.yaml
+	
+	# result: namespace/default configured
+
+	Confirm labeling
+		bash --> kubectl describe ns default
+
+		# result: Labels:       istio-injection=enabled
+
+	# This will add the additional proxy container is every pod application in the 'default' namespace.
+	# It is important to apply this label to the working namespace before start deploying the application
+
+Deploy the application
+	bash --> kubectl apply -f 5-application-no-istio.yaml
+
+
+Create/expose Kiali service
+	terminal --> kubectl expose deployment kiali -n istio-system --type=NodePort --port=20001 --target-port=20001
+
+	# result: service/kiali exposed
+
+
+Check Kiali service existance
+	terminal --> kubectl get svc -n istio-system
+
+	# result:
+	NAME                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      
+	kiali                  NodePort    10.100.117.213   <none>        20001:30306/TCP  # Created Kiali UI service                                                        
+
+
+Expose Istio Kiali UI
+	terminal --> kubectl port-forward svc/kiali 20001:20001 -n istio-system
+		
+	Access the KIali UI on http://localhost:20001                                                    
+
+Expose Jaeger (tracing) service
+	terminal --> kubectl port-forward svc/tracing 8080:80 -n istio-system
+		
+	We can now access Jaeger on http://localhost:8080
+
+Apply the istion confguration
+	terminal --> k apply -f 6-gateway.yaml
+
+Expose the application with port forward
+	terminal --> kubectl port-forward svc/istio-ingressgateway -n istio-system 31380:80
+
+	Access the application on http://localhost:31380/
+---------------------------------------------------------------------------------------
+
+
+
+
+
+
+47. Cascading Failures
+======================
+
+We can never assume that a network is reliable, there always be failures and we need wherever possible to design our system to be a fault tolerant. On of the main issues we will focus is cascading failure.
+
+Cascading Failures:
+-------------------
+Lets say we have few microservices connected and working together. The last one in the chain start working slow for some reason (pod resources limits, code falure etc.). The service which is trying to send request to the slow service is now being blocked by linit of requests sent (timedout) and limit of the active connections with the 'slow' service. The problems follow the services in the chain.
+
+Consiquences:
+-------------
+When a cascade failure happend the in out of working hours the failure take over more than one service and the whole system is sending errors if not already down. It is very hard to follow which service exactly is causing the falure. When we are in this kind of situation it is hard also to recover the system in working state, it may take hours aor days. The root cause analysis may take a while before we find the root cause because the errors came from the entire system and the original cause may be very difficult to trace.
+
+The solution - Circuit Braker! 
+Circuit braker works on POD LEVEL!
+
+Circuit Brakeing: 
+-----------------
+This is a software that handles the requests sending and receiving patterns. The purpose of the circuit braker is to measure the success rate of the call its making (requests sent and responces received). This circuit braker is configarable and based on that configuration if the circuit braker determine that too many of the sent requests has failed then the circuit braker will stop sendin any requests to the failing pods. The circuit braker also reject all incoming requests from connected services and return clear fault status. This action gives time to the strugling pod to get back on its feet (waiting for the pod to cach up if possible - free resources or to be recreated by the cluster). In this timeout (with configurable length) the circuit braker will try to reconnect with the ejected pod to check if the communication is restored. If it is the circuit braker will allow calls to this pod to continue. This prevents flood of requests and errors on the heavily loaded system. It is called also failed fast mechanism. It is better for those requests to fail fast and not using resources for the failure period because they are going to fail anyway. Popular circuit braker software is Hystrix (Netflix project).
+
+The role is presented on picture circuit-braking-role.png.
+
+Requirements:
+-------------
+1. We need to build this functionlaity in our application (ie. every microservice).
+2. We are depending on the language our application is written on or available implementations of ready to use circuit brakers.
+
+
+Istio solution:
+---------------
+Istio proxies (envoy) already have built in circuit brakers and we don't need to implement anything additional in our application except to configure circuit braker in Istio.
+
+Usually circuit brakers are used in high traffic applications but it is recommended to have this feature in every system especially if Istio is already installed.
+
+We need to configure circuit brakers carefuly - not too sesnsitive and not unsensitive at all. The circuit brakers should be well defined and configured and serve their purpose.
+
+
+
+48. Configuring Outlier Detection
+=================================
+
+We have configuration for 2 pods with different images in file 5-application-no-istio.yaml. One of the imgaes is bad preformer and the other is working normaly. We will configure and test the work of a curcuit braker. When we deploy the application we will randomly get drivers with missing pictures (not able to load them) and return status 500.
+
+
+We will create 20 continues requests with curl
+	terminal --> for i in {1..20}; do curl -s http://localhost:31380/api/vehicles/driver/City%20Truck; echo; sleep 0.5; done
+
+We should receive about 50/50 success and status 500 error response rate.
+
+Example result types:
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}		# good response
+{"timestamp":"2026-02-05T17:21:15.183+0000","status":500,"error":"Internal Server Error","message":"status 502 reading RemoteStaffMicroserviceCalls#getDriverFor(String)","path":"//vehicles/driver/City%20Truck"}	# bad response
+
+
+Configuring Circuit Braker:
+---------------------------
+We must configure Destination Rule for our purpose. 
+
+We can look over the official Istio circuit braker documentation (mentioned also as 'outlier detection') - https://istio.io/latest/docs/reference/config/networking/destination-rule/#OutlierDetection
+
+We can generate DestinationRule template with Kiali UI, in other case we can use the file 7-circuit-breaking.yaml
+
+
+7-circuit-breaking.yaml
+-------------------------------------------------
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: circuit-breaker-for-the-entire-default-namespace
+spec:
+  host: "fleetman-staff-service.default.svc.cluster.local"  # Use FQDM (fully qulified domain name) for the k8s service
+  trafficPolicy:
+    outlierDetection:                      # Circuit Breakers HAVE TO BE SWITCHED ON
+      maxEjectionPercent: 100              # eject 100% of the falut pods
+      consecutive5xxErrors: 2              # 2 consecutive 5xx errors (5 by default)
+      interval: 10s                        # errors must occur in 10 seconds period
+      baseEjectionTime: 30s                # eject the fault source for 30 seconds
+-------------------------------------------------
+
+FLAGS:
+------
+interval: 10s - time period in which the consecutive errors must appear
+consecutive5xxErrors: 2 - how many consecutive errors we should receive before the circuit braker enables. Triggered any by HTTP 5xx errors
+baseEjectionTime: 30s - for how long fault pods will be disconnected (30 seconds by default). If ejected second time - 2x30s, if 3th time 3x30s and so on.
+maxEjectionPercent: 100 - diconnect all failure pods
+
+
+Apply the circuit braker
+	terminal --> k apply -f 7-circuit-breaking.yaml
+
+	# result: destinationrule.networking.istio.io/circuit-breaker-for-the-entire-default-namespace created
+
+In Kiali UI we can see that flash mark appear on the service and each of the pods behind the service we configured circuit braker on.
+
+
+
+
+49. Testing Circuit Breakers
+============================
+
+We can set circuit braker with rule if the system receive 2 fauls requests in 10 seconds the braker will stop the fault pod.
+
+The role of circuit braker is presented on picture circuit-braker.png.
+
+We can now test the commmunication with these pods with curl command
+	bash --> for i in {1..20}; do curl -s http://localhost:31380/api/vehicles/driver/City%20Truck; echo; sleep 0.5; done
+
+# result:
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"timestamp":"2026-02-05T17:55:35.197+0000","status":500,"error":"Internal Server Error","message":"status 502 reading RemoteStaffMicroserviceCalls#getDriverFor(String)","path":"//vehicles/driver/City%20Truck"}	# 1st bad request
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"timestamp":"2026-02-05T17:55:40.684+0000","status":500,"error":"Internal Server Error","message":"status 502 reading RemoteStaffMicroserviceCalls#getDriverFor(String)","path":"//vehicles/driver/City%20Truck"}	# 2nd bad request
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}		# circuit braker triggered and
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}		# the fault pod is diconnected
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}		# all good requests to the end
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+{"name":"Pam Parry","photo":"https://rac-istio-course-images.s3.amazonaws.com/1.jpg"}
+
+
+We can see that after the second bad request the circuit braker triggers and the failure pod is diconnected. After this all requests are successful.
+
+After 30 seconds the pod will be connected again and we can test this case again
+
+
+
+
+
