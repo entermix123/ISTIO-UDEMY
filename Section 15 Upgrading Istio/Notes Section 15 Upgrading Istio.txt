@@ -1,0 +1,720 @@
+Section 15 Upgrading Istio
+==========================
+
+Section content:
+----------------
+64. In-Place Upgrades
+65. "Canary Upgrades" (Rolling Upgrades)
+66. Live Cluster Switchovers (Alternative to the official upgrade paths)
+
+
+We will go over how to update a running Istio installation on live cluster.
+Official Istio Docummentation - https://istio.io/latest/docs/setup/upgrade/
+
+
+Case:
+-----
+We have live cluster with installed istio (proxies) on all application pods. We have istiod container running in the istio-system namepsace.
+
+We need to upgrade Istio and this is risky operation with high probability of downtime. If something goes wrong and we need to roll back hte previous cluster version, the application will have downtime again and we need to consider this possibilities.
+
+
+
+64. In-Place Upgrades
+=====================
+
+!!! THIS METHOD IS NOT RECOMMENDED FOR PRODUCTION CLUSTERS !!!
+--------------------------------------------------------------
+
+
+Istio Official Documntation - https://istio.io/latest/docs/setup/upgrade/in-place/
+
+Extremely risky and not recommended for production clusters !!!
+
+We need to upgrade the version by one minor version. This means that if we need to upgrade from 1.25 to 1.28 we need to upgrade few times step by step:
+	1. 1.25 --> 1.26
+	2. 1.26 --> 1.27
+	3. 1.27 --> 1.28
+
+We don't need to upgrade the addons necessarily. They are only for administrative actions and they work over mixed version.
+
+
+
+DEMO:
+=====
+
+We will install 2 version of istioctl and use the lower one to install minikube cluster and then upgrade it with the higher version.
+
+Since we using Docker Desktop we will download and install 4 Istio version (2 for Windows{our OS} and 2 for Linux {we get manifests for the upgrade})
+
+
+Download latest istioctl versionm
+---------------------------------
+
+1.1  Download istio 1.28.3
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.28.3/istio-1.28.3-win.zip -o istio-1.28.3-win.zip
+
+Unachive
+	bash --> unzip istio-1.28.3-win.zip -d istio-1.28.3-win
+
+1.2 Download Linux FIles for the manifests
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.28.3/istio-1.28.3-linux-amd64.tar.gz -o istio-1.28.3.tar.gz
+
+Unachive
+	bash --> tar -xzf istio-1.28.3.tar.gz
+
+Copy manifests from Linux to Windows directories
+	bash --> cp -r istio-1.28.3/manifests istio-1.28.3-win/istio-1.28.3/
+	
+Set alias in bash config
+	bash --> vi ~/.bashrc
+
+.bashrc
+----------------------------------------------------------------
+export PATH="$HOME/istio-1.28.3-win/istio-1.28.3/bin:$PATH"		# permanent version used
+alias k='kubectl'
+ISTIO_128="$HOME/istio-1.28.3-win/istio-1.28.3/bin/istioctl"
+
+alias istioctl-1.28="$ISTIO_128"
+----------------------------------------------------------------
+save changes - escape, :wq!, enter
+
+Reload the terminal 
+	bash --> source ~/.bashrc
+
+Confirm installation
+Switch to 1.28.3
+	terminal --> istioctl-1.28 version --remote=false
+
+	# result: client version: 1.28.3	
+
+
+
+Download lower istioctl version
+-------------------------------
+
+2.1  Download istio 1.27.4
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.27.4/istio-1.27.4-win.zip -o istio-1.27.4-win.zip
+
+Unachive
+	bash --> unzip istio-1.27.4-win.zip -d istio-1.27.4-win
+
+2.2 Download Linux FIles for the manifests
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.27.4/istio-1.27.4-linux-amd64.tar.gz -o istio-1.27.4.tar.gz
+
+Unachive
+	bash --> tar -xzf istio-1.27.4.tar.gz
+
+Copy manifests from Linux to Windows directories
+	bash --> cp -r istio-1.27.4/manifests istio-1.27.4-win/istio-1.27.4/
+	
+Set alias in bash config
+	bash --> vi ~/.bashrc
+
+.bashrc
+----------------------------------------------------------------
+export PATH="$HOME/istio-1.28.3-win/istio-1.28.3/bin:$PATH"		# permanent version used
+alias k='kubectl'
+ISTIO_128="$HOME/istio-1.28.3-win/istio-1.28.3/bin/istioctl"
+ISTIO_127="$HOME/istio-1.27.4-win/istio-1.27.4/bin/istioctl"
+
+alias istioctl-1.28="$ISTIO_128"
+alias istioctl-1.27="$ISTIO_127"
+----------------------------------------------------------------
+save changes - escape, :wq!, enter
+
+Reload the terminal 
+	bash --> source ~/.bashrc
+
+Check PATH
+	bash --> cat ~/.bashrc | grep alias
+
+	# result:
+	alias k='kubectl'
+	alias istioctl-1.28="$ISTIO_128"
+	alias istioctl-1.27="$ISTIO_127"
+
+
+Confirm installation
+Switch to 1.24
+	terminal --> istioctl-1.27 version --remote=false
+
+	# result: client version: 1.27.4	# THIS IS THE CURRENT ISTOCTL VERSION WE WILL DEPLOY MINIKUBE WITH
+
+
+We can now use both version of Istio
+
+
+
+
+CREATE MINIKUBE CLUSTER
+-----------------------
+
+Create minikube cluster 
+	terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+Install lower Istio version (1.27.4) with demo account on minikube cluster
+	terminal --> istioctl-1.27 install --set profile=demo -y
+
+Initialize addons and install them
+	terminal --> kubectl apply -f init-addons.yaml
+	terminal --> kubectl apply -f addons.yaml
+
+Confirm all pods are running
+	terminal --> k get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-8zrx7                1/1     Running   0          71s
+	istio-egressgateway-6d9cf7969-6p64q     1/1     Running   0          99s
+	istio-ingressgateway-799f6bbb55-9tvb7   1/1     Running   0          99s
+	istiod-f58cff49c-bzmkv                  1/1     Running   0          117s
+	jaeger-76d7cfcfdb-hfzcw                 1/1     Running   0          70s
+	kiali-594fb85dc8-lcp9t                  1/1     Running   0          70s
+	prometheus-65bdbcd97f-cx2kn             2/2     Running   0          71s
+
+
+Expose grafana service with port forwarding
+	terminal --> kubectl port-forward svc/grafana 3000:3000 -n istio-system
+
+Access grafana on http://localhost:3000
+
+We can see useful information on istio / Istio Mesh Dashboard:
+	- At the bottom of the page we can see Istio Components by Version graph
+	- Maximize the graph with 'V'
+
+We can see the current version of Istio pilot (istiod) is the installed 1.23.
+
+
+Install application (workload)
+	terminal --> kubectl apply -f 4-label-default-namespace.yaml
+	terminal --> kubectl apply -f 5-application-no-istio.yaml
+	terminal --> kubectl apply -f 6-gateway.yaml
+
+Wait until the pods are fully deployed
+	terminal --> k get pods
+
+	# result:
+	NAME                                           READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-l4wn4                   2/2     Running   0          101s
+	position-simulator-8449f4c5cc-gm4p9            2/2     Running   0          101s
+	position-tracker-676dd958cf-t4g8d              2/2     Running   0          101s
+	staff-service-dbf6cb866-vlvrd                  2/2     Running   0          101s
+	staff-service-risky-version-65565b7f55-t4tzk   2/2     Running   0          101s
+	vehicle-telemetry-64bb8b49-f4wlc               2/2     Running   0          101s
+	webapp-d688b487-5rlnp                          2/2     Running   0          101s
+
+
+On grafana istio / Istio Mesh Dashboard / Istio Components by Version (bottom graph) - http://localhost:3000
+ 
+We can see that additional workload is presented. We can see how many (8) sidecars are running on our cluster.
+
+The reason we have 8 and not 7 porxies (we have 7 workload pods) is that the gateway is alos a container with proxy container.
+
+
+
+THE UPGRADE
+-----------
+
+We can now upgrade with one command
+	bash --> istioctl-1.28 upgrade
+	bash --> y				# confirm changes
+
+# result:
+WARNING: Istio 1.26.0 may be out of support (EOL) already: see https://istio.io/latest/docs/releases/supported-releases/ for supported releases
+WARNING: Istio is being upgraded from 1.27.4 to 1.28.3.
+         Running this command will overwrite it; use revisions to upgrade alongside the existing version.
+         Before upgrading, you may wish to use 'istioctl x precheck' to check for upgrade warnings.
+This will install the Istio 1.28.3 profile "default" into the cluster. Proceed? (y/N) y
+✔ Istio core installed ⛵️
+✔ Istiod installed 🧠
+✔ Ingress gateways installed 🛬
+✔ Installation complete
+
+Confirm Upgrade
+	terminal --> k get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-8zrx7                1/1     Running   0          12m
+	istio-egressgateway-6d9cf7969-6p64q     1/1     Running   0          12m
+	istio-ingressgateway-6b89d47f9d-vj44f   1/1     Running   0          6m11s	# upgrated
+	istiod-5b4c5695cd-qjzkf                 1/1     Running   0          6m28s	# upgrated
+	jaeger-76d7cfcfdb-hfzcw                 1/1     Running   0          12m
+	kiali-594fb85dc8-lcp9t                  1/1     Running   0          12m
+	prometheus-65bdbcd97f-cx2kn             2/2     Running   0          12m
+
+
+In grafana graph (http://localhost:3000/) we can see that in 10 - 15 seconds period the upgrade is visible only for one pod - pilot (istiod).
+
+We need to restart the application pods for the proxies upgrade to take effect in them also
+	terminal --> k rollout restart deploy		# we can delete/restart pods one by one if we don't have enough resources
+
+Wait a few minutes and check pods again
+	terminal --> k get pods
+
+	# result:
+	NAME                                          READY   STATUS    RESTARTS   AGE
+	api-gateway-54d8955469-wntwz                  2/2     Running   0          54s
+	position-simulator-6d84dd7566-b4hxs           2/2     Running   0          54s
+	position-tracker-64b59dc79b-t7rbc             2/2     Running   0          54s
+	staff-service-df75d7769-kt8gz                 2/2     Running   0          54s
+	staff-service-risky-version-f54c8fc66-jkwb5   2/2     Running   0          54s
+	vehicle-telemetry-74486f84bb-rprw2            2/2     Running   0          54s
+	webapp-d9bbbc46b-svq6p                        2/2     Running   0          54s
+
+
+In grafana graph (http://localhost:3000/) we can see that in 10 - 15 seconds period the upgrade is visible and we have 8 proxies with the new version 1.28.3
+
+During the update process a second istiod (istio daemon) is created. All proxies are connected to 2 istiod (istio control plane) at the same time. This can create some confusion in edge cases. Next the old istiod is removed and the connections with the proxies are degraded. Now the istiod is newer version buth the proxies are old version. We need to restart/redeployed (redeployed automatically by the system after delete) all pods with prxoies so the proxies can be upgraded also. This restart must happend in separate step - another risky step.
+
+Grafana graph is presented on In-Place-upgrade-grafana.png
+
+
+!!! THIS METHOD IS NOT RECOMMENDED FOR PRODUCTION CLUSTERS !!!
+--------------------------------------------------------------
+
+
+
+
+65. "Canary Upgrades" (Rolling Upgrades)
+========================================
+
+Official Istio Documentation - https://istio.io/latest/docs/setup/upgrade/canary/
+
+
+DEMO:
+=====
+
+We will install 2 version of istioctl and use the lower one to install minikube cluster and then upgrade it with the higher version.
+
+Since we using Docker Desktop we will download and install 4 Istio version (2 for Windows{our OS} and 2 for Linux {we get manifests for the upgrade})
+
+
+Download latest istioctl versionm
+---------------------------------
+
+1.1  Download istio 1.28.3
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.28.3/istio-1.28.3-win.zip -o istio-1.28.3-win.zip
+
+Unachive
+	bash --> unzip istio-1.28.3-win.zip -d istio-1.28.3-win
+
+1.2 Download Linux FIles for the manifests
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.28.3/istio-1.28.3-linux-amd64.tar.gz -o istio-1.28.3.tar.gz
+
+Unachive
+	bash --> tar -xzf istio-1.28.3.tar.gz
+
+Copy manifests from Linux to Windows directories
+	bash --> cp -r istio-1.28.3/manifests istio-1.28.3-win/istio-1.28.3/
+	
+Set alias in bash config
+	bash --> vi ~/.bashrc
+
+.bashrc
+----------------------------------------------------------------
+export PATH="$HOME/istio-1.28.3-win/istio-1.28.3/bin:$PATH"		# permanent version used
+alias k='kubectl'
+ISTIO_128="$HOME/istio-1.28.3-win/istio-1.28.3/bin/istioctl"
+
+alias istioctl-1.28="$ISTIO_128"
+----------------------------------------------------------------
+save changes - escape, :wq!, enter
+
+Reload the terminal 
+	bash --> source ~/.bashrc
+
+Confirm installation
+Switch to 1.28.3
+	terminal --> istioctl-1.28 version --remote=false
+
+	# result: client version: 1.28.3	
+
+
+
+Download lower istioctl version
+-------------------------------
+
+2.1  Download istio 1.27.4
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.27.4/istio-1.27.4-win.zip -o istio-1.27.4-win.zip
+
+Unachive
+	bash --> unzip istio-1.27.4-win.zip -d istio-1.27.4-win
+
+2.2 Download Linux FIles for the manifests
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.27.4/istio-1.27.4-linux-amd64.tar.gz -o istio-1.27.4.tar.gz
+
+Unachive
+	bash --> tar -xzf istio-1.27.4.tar.gz
+
+Copy manifests from Linux to Windows directories
+	bash --> cp -r istio-1.27.4/manifests istio-1.27.4-win/istio-1.27.4/
+	
+Set alias in bash config
+	bash --> vi ~/.bashrc
+
+.bashrc
+----------------------------------------------------------------
+export PATH="$HOME/istio-1.28.3-win/istio-1.28.3/bin:$PATH"		# permanent version used
+alias k='kubectl'
+ISTIO_128="$HOME/istio-1.28.3-win/istio-1.28.3/bin/istioctl"
+ISTIO_127="$HOME/istio-1.27.4-win/istio-1.27.4/bin/istioctl"
+
+alias istioctl-1.28="$ISTIO_128"
+alias istioctl-1.27="$ISTIO_127"
+----------------------------------------------------------------
+save changes - escape, :wq!, enter
+
+Reload the terminal 
+	bash --> source ~/.bashrc
+
+Check PATH
+	bash --> cat ~/.bashrc | grep alias
+
+	# result:
+	alias k='kubectl'
+	alias istioctl-1.28="$ISTIO_128"
+	alias istioctl-1.27="$ISTIO_127"
+
+
+Confirm installation
+Switch to 1.24
+	terminal --> istioctl-1.27 version --remote=false
+
+	# result: client version: 1.27.4	# THIS IS THE CURRENT ISTOCTL VERSION WE WILL DEPLOY MINIKUBE WITH
+
+
+We can now use both version of Istio
+
+
+
+
+CREATE MINIKUBE CLUSTER
+-----------------------
+
+Delete the old minikube cluster	
+	bash --> minikube delete
+
+Create minikube cluster 
+	terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+Install lower Istio version (1.27.4) with demo account on minikube cluster with revision tag (dots are not allowed so we use dash)
+	terminal --> istioctl-1.27 install --set profile=demo --set revision=1-27 -y
+
+Check installation
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-678db6475f-9cv6r    1/1     Running   0          25s
+	istio-ingressgateway-5d876dd4b9-m97jb   1/1     Running   0          25s
+	istiod-1-27-67b7b86877-qg4mr            1/1     Running   0          42s	# istiod is labeled with revision
+
+We will set label on every namespace we deploy pods to for Istio to recognize the version.
+
+Label the working namespaces with file 1-label-target-istio-version.yaml
+
+1-label-target-istio-version.yaml
+-------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    istio.io/rev: 1-27       # label
+  name: default              # target namespace
+-------------------------------------------------
+
+Apply the labeling
+	terminal --> kubectl apply -f 1-label-target-istio-version.yaml
+
+	# result: namespace/default configured
+
+
+Install application (workload)
+	terminal --> kubectl apply -f 2-application-no-istio.yaml
+	terminal --> kubectl apply -f 3-gateway.yaml
+
+Wait until the pods are fully deployed
+	terminal --> k get pods
+
+	# result:
+	NAME                                           READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-sh4ws                   2/2     Running   0          99s
+	position-simulator-8449f4c5cc-tqbs6            2/2     Running   0          99s
+	position-tracker-676dd958cf-hsrp6              2/2     Running   0          99s
+	staff-service-dbf6cb866-79jht                  2/2     Running   0          99s
+	staff-service-risky-version-65565b7f55-p9c26   2/2     Running   0          99s
+	vehicle-telemetry-64bb8b49-zwvv7               2/2     Running   0          99s
+	webapp-d688b487-kh22b                          2/2     Running   0          99s
+
+
+
+
+
+
+THE UPGRADE
+-----------
+
+Check ALL proxies connection to istio daemon
+	bash --> istioctl-1.27 proxy-status
+
+# result:
+NAME                                                     CLUSTER        ISTIOD                           VERSION     SUBSCRIBED TYPES
+api-gateway-64d5b6b4cb-sh4ws.default                     Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+istio-egressgateway-678db6475f-9cv6r.istio-system        Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      3 (CDS,LDS,EDS)
+istio-ingressgateway-5d876dd4b9-m97jb.istio-system       Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+position-simulator-8449f4c5cc-tqbs6.default              Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+position-tracker-676dd958cf-hsrp6.default                Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+staff-service-dbf6cb866-79jht.default                    Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+staff-service-risky-version-65565b7f55-p9c26.default     Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+vehicle-telemetry-64bb8b49-zwvv7.default                 Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+webapp-d688b487-kh22b.default                            Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+
+In 'ISTIOD' column we can see which istiod the proxies are connected to.
+
+
+
+STEP 1: 
+-------
+Upgrade with the new version
+	bash --> istioctl-1.28 install --set profile=demo --set revision=1-28 -y
+
+Now new istiod (Istio daemon) will be created but hte proxies will not be connected to it yet.
+
+List pods in istio-system namespace
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-748b694b4-qfdw6    1/1     Running   0          3m10s	# new egressgateway
+	istio-ingressgateway-579c6774b-nlgcs   1/1     Running   0          3m10s	# new ingressgateway
+	istiod-1-27-67b7b86877-qg4mr           1/1     Running   0          26m		# old istiod
+	istiod-1-28-6c6c8b4c85-64q7c           1/1     Running   0          3m30s	# new istiod
+
+
+Show the proxies connections
+	bash --> istioctl-1.27 proxy-status
+
+# result:
+NAME                                                     CLUSTER        ISTIOD                           VERSION     SUBSCRIBED TYPES
+api-gateway-64d5b6b4cb-sh4ws.default                     Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+istio-egressgateway-748b694b4-qfdw6.istio-system         Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      3 (CDS,LDS,EDS)
+istio-ingressgateway-579c6774b-nlgcs.istio-system        Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+position-simulator-8449f4c5cc-tqbs6.default              Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+position-tracker-676dd958cf-hsrp6.default                Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+staff-service-dbf6cb866-79jht.default                    Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+staff-service-risky-version-65565b7f55-p9c26.default     Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+vehicle-telemetry-64bb8b49-zwvv7.default                 Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+webapp-d688b487-kh22b.default                            Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+
+In column 'ISTIOD' we can see that all proxies are still connected to the old istiod except ingressgateway and egressgateway.
+
+This switch of the ingressgateway is the riskiest action in this upgrade !!!
+
+
+STEP 2: 
+-------
+Upgrade the namespace label in the label file 1-label-target-istio-version.yaml
+
+1-label-target-istio-version.yaml
+-------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    istio.io/rev: 1-28       # changed label to the newer istio version
+  name: default              # target namespace
+-------------------------------------------------
+
+Apply the label to the working namespace
+	bash --> kubectl apply -f 1-label-target-istio-version.yaml
+	
+	# result: namespace/default configured
+
+
+
+STEP 3: 
+-------
+
+To switch proxies to the new version we need to restart the application pods one by one for safer transit. (or restart every deployment if more then one pod in them).
+
+List pods
+	bash --> kubectl get pods
+
+	# result:
+	NAME                                           READY   STATUS    RESTARTS   AGE
+	api-gateway-64d5b6b4cb-sh4ws                   2/2     Running   0          37m
+	position-simulator-8449f4c5cc-tqbs6            2/2     Running   0          37m
+	position-tracker-676dd958cf-hsrp6              2/2     Running   0          37m
+	staff-service-dbf6cb866-79jht                  2/2     Running   0          37m
+	staff-service-risky-version-65565b7f55-p9c26   2/2     Running   0          37m
+	vehicle-telemetry-64bb8b49-zwvv7               2/2     Running   0          37m
+	webapp-d688b487-kh22b                          2/2     Running   0          37m
+
+List deployments
+	terminal --> k get deploy
+
+	# result:
+	NAME                          READY   UP-TO-DATE   AVAILABLE   AGE
+	api-gateway                   1/1     1            1           53m
+	position-simulator            1/1     1            1           53m
+	position-tracker              1/1     1            1           53m
+	staff-service                 1/1     1            1           53m
+	staff-service-risky-version   1/1     1            1           53m
+	vehicle-telemetry             1/1     1            1           53m
+	webapp                        1/1     1            1           53m
+
+First we will delete one pod and it will be redeployed by the deployment replicaset
+Restart the telemetry pod
+	bash --> kubectl delete pod vehicle-telemetry-64bb8b49-zwvv7
+
+After we will restart a deployment
+Restart position-tracker deployment
+	bash --> kubectl rollout restart deploy position-tracker -n default
+
+Check the status of the proxies
+	bash -->  istioctl-1.27 proxy-status
+
+# result:
+NAME                                                     CLUSTER        ISTIOD                           VERSION     SUBSCRIBED TYPES
+api-gateway-64d5b6b4cb-sh4ws.default                     Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+istio-egressgateway-748b694b4-qfdw6.istio-system         Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      3 (CDS,LDS,EDS)
+istio-ingressgateway-579c6774b-nlgcs.istio-system        Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+position-simulator-8449f4c5cc-tqbs6.default              Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+position-tracker-bb6864ccb-cggjs.default                 Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+staff-service-dbf6cb866-79jht.default                    Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+staff-service-risky-version-65565b7f55-p9c26.default     Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+vehicle-telemetry-64bb8b49-58k7d.default                 Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+webapp-d688b487-kh22b.default                            Kubernetes     istiod-1-27-67b7b86877-qg4mr     1.27.4      4 (CDS,LDS,EDS,RDS)
+
+We can see that the proxies in the pods we recreated are connected to the new istiod (istio control plane)
+
+
+
+Restart the rest of the deployment:
+IN PRODUCTION WE WAIT UNTIL THE DEPLOYMENT IS RESTARTED, TEST FUNCTIONALITY AND THEN RESTART THE NEXT ONE !!!
+	bash --> kubectl rollout restart deploy staff-service-risky-version
+	# test
+	bash --> kubectl rollout restart deploy api-gateway
+	# test
+	bash --> kubectl rollout restart deploy position-simulator
+	# test
+	bash --> kubectl rollout restart deploy staff-service
+	# test
+	bash --> kubectl rollout restart deploy staff-service-risky-version
+	# test
+	bash --> kubectl rollout restart deploy webapp
+	# test
+
+If results from the testing are not good and we want to rollback the previous version we should:
+	1. replace the label of the working namespace with the previous istio version and apply it
+	2. destart the pods that are being tested unsuccessfully
+
+
+Check the status of the proxies
+	bash -->  istioctl-1.27 proxy-status
+
+# result:
+NAME                                                     CLUSTER        ISTIOD                           VERSION     SUBSCRIBED TYPES
+NAME                                                     CLUSTER        ISTIOD                           VERSION     SUBSCRIBED TYPES
+api-gateway-55f4cdc58c-lz5bp.default                     Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+istio-egressgateway-748b694b4-qfdw6.istio-system         Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      3 (CDS,LDS,EDS)
+istio-ingressgateway-579c6774b-nlgcs.istio-system        Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+position-simulator-5fb5769c8d-q24vr.default              Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+position-tracker-bb6864ccb-cggjs.default                 Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+staff-service-8cb89495b-554kz.default                    Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+staff-service-risky-version-7454747ffd-vnzp8.default     Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+vehicle-telemetry-64bb8b49-58k7d.default                 Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+webapp-6b8b945c5c-sv48w.default                          Kubernetes     istiod-1-28-6c6c8b4c85-64q7c     1.28.3      4 (CDS,LDS,EDS,RDS)
+
+
+We can see that all proxies are connected to the new istiod (istio control plane)
+
+
+
+
+STEP 4: 
+-------
+Delete the old version istiod (old istio control plane)
+IMPORTATNT TO USE THE CORRECT COMMAND SO WE DONT DELETE ALL ISTIO VERSIONS !!!
+	bash --> istioctl-1.27 uninstall --revision 1-27 -y
+
+# result:
+  Removed apps/v1, Kind=Deployment/istiod-1-27.istio-system.
+  Removed /v1, Kind=Service/istiod-1-27.istio-system.
+  Removed /v1, Kind=ConfigMap/istio-1-27.istio-system.
+  Removed /v1, Kind=ConfigMap/istio-sidecar-injector-1-27.istio-system.
+  Removed /v1, Kind=ConfigMap/values-1-27.istio-system.
+  Removed /v1, Kind=ServiceAccount/istiod-1-27.istio-system.
+  Removed rbac.authorization.k8s.io/v1, Kind=RoleBinding/istiod-1-27.istio-system.
+  Removed rbac.authorization.k8s.io/v1, Kind=Role/istiod-1-27.istio-system.
+  Removed policy/v1, Kind=PodDisruptionBudget/istio-egressgateway.istio-system.
+  Removed policy/v1, Kind=PodDisruptionBudget/istio-ingressgateway.istio-system.
+  Removed policy/v1, Kind=PodDisruptionBudget/istiod-1-27.istio-system.
+  Removed admissionregistration.k8s.io/v1, Kind=MutatingWebhookConfiguration/istio-revision-tag-default..
+  Removed admissionregistration.k8s.io/v1, Kind=MutatingWebhookConfiguration/istio-sidecar-injector-1-27..
+  Removed admissionregistration.k8s.io/v1, Kind=ValidatingWebhookConfiguration/istio-validator-1-27-istio-system..
+  Removed admissionregistration.k8s.io/v1, Kind=ValidatingWebhookConfiguration/istiod-default-validator..
+  Removed rbac.authorization.k8s.io/v1, Kind=ClusterRole/istio-reader-clusterrole-1-27-istio-system..
+  Removed rbac.authorization.k8s.io/v1, Kind=ClusterRole/istiod-clusterrole-1-27-istio-system..
+  Removed rbac.authorization.k8s.io/v1, Kind=ClusterRole/istiod-gateway-controller-1-27-istio-system..
+  Removed rbac.authorization.k8s.io/v1, Kind=ClusterRoleBinding/istio-reader-clusterrole-1-27-istio-system..
+  Removed rbac.authorization.k8s.io/v1, Kind=ClusterRoleBinding/istiod-clusterrole-1-27-istio-system..
+  Removed rbac.authorization.k8s.io/v1, Kind=ClusterRoleBinding/istiod-gateway-controller-1-27-istio-system..
+✔ Uninstall complete
+
+
+Check pod in istio namespace
+	bash --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-748b694b4-qb848    1/1     Running   0          7m11s
+	istio-ingressgateway-579c6774b-k5ftf   1/1     Running   0          7m11s
+	istiod-1-28-6c6c8b4c85-czsww           1/1     Running   0          7m26s
+
+
+
+
+
+
+
+
+
+66. Live Cluster Switchovers (Alternative to the official upgrade paths)
+========================================================================
+
+Cluster Structure:
+	- Domain Name example - fleetman.com
+	- Cloud Load Balancer - LB (connected to our ingress controller)
+	- External Persisted Storage - Cloud Database or Q like Kafka, Apache MQ, Rabbit MQ or NOSQL DB like DynamoDB, MongoDB or relational database (RDS)
+	- Entire cluster should be regeneratable via Source Control (Cluster YAML configuration)
+
+This approach requires the pods in the cluster to be stateless. This means that if we delete any pod the cluster will continue to be healthy. This is hard to achieve in big cluster but it can can be achieved with persistent storage outside of the cluster.
+
+
+Process
+-------
+We have production cluster with Istio 1.27 version connected to external persistent storage.
+
+We provision new cluster (can be in different cloud region or country) with the upgraded Istio 1.28 version. The upgraded cluster is connect to the same storage the production cluster (Istio 1.27). We can test our upgraded version if it works correctly.
+
+Next we can set percentage of the live workload redirected to the new cluster via Load Balancer configuration if possible or set dedicated Load Balancer for the upgraded Istio cluster. This can also be used for testing with real load.
+
+Next we switch all the load to the upgraded cluster. If we have a dedicated Load Balancer it may take some time for the browsers cach to be overwritten and redirect all of the load to the new balancer. This process may take hours or days depending on the load and it is called 'draining the old cluster'.
+
+Next we can diconnect the old cluster and continue with the upgraded only.
+
+This is the ideal and most safer way to switch between different cluster versions. It is not a standard apprach and it is hard to enforce this practices.
+
+The process is presented on picture Live-Cluster-Switchover.png.
+
+
+
