@@ -1,0 +1,13 @@
+This will be living course - updated in the time ahead.
+
+The features Istio provides are huge benefits to a cluster.
+	- Traffic Management
+	- Circuit brakers
+	- Mutual TLS
+	- Fault Injection
+
+If we want to implement them manually we have to make massive invasive changes to our applications code. 
+
+Istio has pros and cons. Some of the tradeoffs we can mention are:
+	- Misconfiguration - difficult to diagnose
+	- Complexity - another huge and complex layer over the already complex Kubernetes nature
