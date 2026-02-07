@@ -1,0 +1,610 @@
+Section 14 Customizing nad installing Istio with istionctl.txt
+==============================================================
+
+Section content:
+----------------
+55. Quick note on "uninstall"
+56. Introducing istioctl
+57. Istio Profiles
+58. Installing addons
+59. Notes on the upcoming video
+60. Tuning Profiles
+61. Note on the upcoming video
+62. Default vs Demo Profiles - CPU and Memory
+63. Generating YAML Manifests
+
+
+
+
+
+
+55. Quick note on "uninstall"
+=============================
+In the next video, after installing Istio, I also show how to uninstall.
+
+When I recorded the video, the command was "experimental". The good news is this command has now "graduated" and is now available as "istioctl uninstall".
+
+
+
+56. Introducing istioctl
+========================
+
+How we can genereta our Istio installation files? With the tool istioctl - Istio control - https://istio.io/latest/docs/reference/commands/istioctl/
+
+How to install Istioctl - https://istio.io/latest/docs/setup/getting-started/
+
+
+ISNTALL LATEST ISTIO ON WINDOWS
+-------------------------------
+
+Download latest istio
+	bash --> curl -L https://github.com/istio/istio/releases/download/1.23.0/istio-1.23.0-win.zip -o istio.zip
+
+	bash --> unzip istio.zip
+	bash --> cd istio-1.23.0
+	
+Add to PATH
+	bash --> export PATH="$PATH:$PWD/bin"
+
+Reload the terminal 
+	bash --> source ~/.bashrc
+
+Confirm installation
+	terminal --> istioctl version --remote=false
+
+
+
+
+CREATE NEW MINIKUBE CLUSTER:
+----------------------------
+
+Delete old minikube cluster
+	terminal --> minikube delete
+
+Create new Minikube cluster
+	terminal --> minikube start --cpus 4 --memory 8192 --driver docker
+
+Point Kubectl to Minikube cluster
+		terminal --> kubectl config use-context minikube
+
+
+
+INSTALL ISTIO ON MINIKUBE CLUSTER
+---------------------------------
+Install Istio with demo profile
+	bash --> istioctl install
+	bash --> y				# default user?
+
+	# result:
+	✔ Istio core installed ⛵️
+	✔ Istiod installed 🧠
+	✔ Ingress gateways installed 🛬
+	✔ Installation complete                                                                                                	Made this installation the default for cluster-wide operations.
+
+Confirm installation
+	terminal --> k get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-ingressgateway-799d9c669b-vv6c9   1/1     Running   0          2m7s
+	istiod-dc8d8b6d5-j64bs                  1/1     Running   0          2m23s
+
+
+OPTIONAL - Uninstall Istio from a cluster
+	terminal --> istioctl uninstall
+
+
+
+
+
+57. Istio Profiles
+==================
+
+Istio official Documentation - https://istio.io/latest/docs/setup/additional-setup/config-profiles/
+
+Each profile is a different configurations of Istio isntallation. We will go over few profiles:
+
+1. DEFAULT: (PRODUCTION RECOMMENDED)
+- enables components according to the default settings of the IstioOperator API (https://istio.io/latest/docs/reference/config/istio.operator.v1alpha1/). This profile is recommended for production deployments and for primary clusters in a multicluster mesh (https://istio.io/latest/docs/ops/deployment/deployment-models/#multiple-clusters).
+
+2. DEMO: (TEST RECOMMENDED)
+- configuration designed to showcase Istio functionality with modest resource requirements. It is suitable to run the Bookinfo application and associated tasks. This is the configuration that is installed with the quick start instructions.
+This profile enables high levels of tracing and access logging so it is not suitable for performance tests.
+
+
+We can overwrite installed 'default' profile.
+	terminal --> istioctl install --set profile=demo
+	terminal --> y
+
+Confirm installation of the demo profile
+	terminal --> k get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kf4xf     1/1     Running   0          20s	# added egressgateway
+	istio-ingressgateway-6f868bc4f7-q46z4   1/1     Running   0          20s
+	istiod-77cb77f5b8-7hz7r                 1/1     Running   0          22s
+
+OPTIONAL - Switch back to 'default' profile
+	terminal --> istioctl install
+
+
+
+
+
+58. Installing addons
+=====================
+
+List Istio pods
+	terminal --> k get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	istio-egressgateway-9cc489bfc-kf4xf     1/1     Running   0          20s
+	istio-ingressgateway-6f868bc4f7-q46z4   1/1     Running   0          20s
+	istiod-77cb77f5b8-7hz7r                 1/1     Running   0          22s
+
+
+We can look over the different Istio integrations - https://istio.io/latest/docs/ops/integrations/
+
+We can choose a random integration:
+
+Grafana:
+--------
+Docs - https://istio.io/latest/docs/ops/integrations/grafana/
+
+Installation:
+Option 1. We can use the provided command  to install grafana
+Option 2. We can use the current Istio version addons in the Istio installation folder
+	On Windows - C:\Users\your_user\istio-1.23.0\samples\addons. 
+	We can apply those manifests to install them
+Option 3. In the course section in the Manifests folder we have already prepared configuration  # USED
+	terminal --> kubectl apply -f init-addons.yaml		# prepare addons installation
+	terminal --> kubectl apply -f addons.yaml		# all addons in one file
+
+Check the installtion
+	terminal --> kubectl get pods -n istio-system
+
+	# result:
+	NAME                                    READY   STATUS    RESTARTS   AGE
+	grafana-595d876fb8-rqgdb                1/1     Running   0          63s
+	istio-egressgateway-9cc489bfc-qsjw2     1/1     Running   0          16m
+	istio-ingressgateway-6f868bc4f7-jf5xx   1/1     Running   0          16m
+	istiod-77cb77f5b8-snj2n                 1/1     Running   0          16m
+	jaeger-76d7cfcfdb-2ck6c                 1/1     Running   0          63s
+	kiali-594fb85dc8-xcv2v                  0/1     Running   0          63s
+	prometheus-65bdbcd97f-gbgm8             2/2     Running   0          63s
+
+In this course we have used installtion file '2-istio-minikube.yaml' that contains all Istio modules and addons in one place.
+
+We will see how to generate this file by ourselves.
+
+
+
+
+59. Notes on the upcoming video
+===============================
+
+In the next video, you will see the installation of Istio hang, and I describe a fix which is to set a JWT token setting.
+
+However, this has now been corrected in the version of Istio you are using for the course - so all being well, the install should progress smoothly for you! Hopefully, you will be able to ignore the "fix", it is no longer needed!
+
+
+60. Tuning Profiles
+===================
+
+Istio official Documentation - https://istio.io/latest/docs/setup/additional-setup/config-profiles/
+
+We can use 'default' profile for installing Istio on production cluster and use 'demo' profile to test Istio on testing cluster. We can tune profile configuration for our specific needs.
+
+We can see information about specific profile
+	terminal --> istioctl profile dump <prfile_name>
+
+Create our own profile template with the base 'demo' profile configuration 
+	terminal --> istioctl profile dump demo > raw_demo_settings.yaml
+
+raw_demo_settings.yaml
+-------------------------------------------------
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  components:
+    base:
+      enabled: true
+    egressGateways:
+    - enabled: true
+      name: istio-egressgateway
+    ingressGateways:
+    - enabled: true
+      name: istio-ingressgateway
+    pilot:
+      enabled: true
+  hub: docker.io/istio
+  profile: demo
+  tag: 1.23.0
+  values:
+    defaultRevision: ""
+    gateways:
+      istio-egressgateway: {}
+      istio-ingressgateway: {}
+    global:
+      configValidation: true
+      istioNamespace: istio-system
+    profile: demo
+-------------------------------------------------
+
+
+
+Create profile template with the base 'default' profile configuration 
+	terminal --> istioctl profile dump default > raw_default_settings.yaml
+
+raw_default_settings.yaml
+-------------------------------------------------
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  components:
+    base:
+      enabled: true
+    egressGateways:
+    - enabled: false                            # disabled eggress gateway
+      name: istio-egressgateway
+    ingressGateways:
+    - enabled: true
+      name: istio-ingressgateway
+    pilot:
+      enabled: true
+  hub: docker.io/istio
+  profile: default
+  tag: 1.23.0
+  values:
+    defaultRevision: ""
+    gateways:
+      istio-egressgateway: {}
+      istio-ingressgateway: {}
+    global:
+      configValidation: true
+      istioNamespace: istio-system
+-------------------------------------------------
+
+We can see that the difference between demo and default profile is that the eggress gateway is enabled in the demo profile. 
+
+We can add or enable different features in profile in few ways:
+1. Set profile configuration at the Istio installation
+	terminal --> istioctl install --set profile=demo
+
+2. Manage tuned profile configuration file (tuned_default_settings.yaml) and apply it
+
+tuned_default_settings.yaml
+-------------------------------------------------
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  components:
+    base:
+      enabled: true
+    egressGateways:
+    - enabled: true                           # egress enabled
+      name: istio-egressgateway
+    ingressGateways:
+    - enabled: true
+      name: istio-ingressgateway
+    pilot:
+      enabled: true
+  hub: docker.io/istio
+  profile: default
+  tag: 1.23.0
+  values:
+    defaultRevision: ""
+    gateways:
+      istio-egressgateway: {}
+      istio-ingressgateway: {}
+    global:
+      configValidation: true
+      istioNamespace: istio-system
+-------------------------------------------------
+Save the file in UTF-8 format
+
+Apply the tune profile configuration file with istioctl
+	terminal --> istioctl apply -f tuned_default_settings.yaml
+	terminal --> y
+
+
+
+
+
+61. Note on the upcoming video
+==============================
+In the next video, we look at the yaml which defines the various settings of the demo and default profiles.
+
+One thing to be aware of is that these settings do change from version to version of Istio. You will notice that the settings for Autoscaling, which I highlight in the following video, will be different in your yaml.
+
+They've definitely improved things since I recorded - look out for the "autoscaleEnabled:" field, which is much more intuitive than what you see on the videos!
+
+
+62. Default vs Demo Profiles - CPU and Memory
+=============================================
+
+Both profiles use HPA (horizontal pod autoscaler)
+
+Key Differences Between Profiles
+
+The main differences between default and demo profiles:
+-------------------------------------------------------
+Egress Gateway:
+	Default: Disabled
+	Demo: Enabled
+
+Resource Requests:
+	Default: Higher (cpu: 100m, memory: 128Mi for gateways)
+	Demo: Lower (cpu: 10m, memory: 40Mi for gateways) - optimized for resource-constrained environments
+
+Add-ons:
+	Demo profile enables Grafana, Kiali, Prometheus, and Tracing
+	Default profile doesn't include these add-ons
+
+
+How to Disable HPA (if needed)
+
+If you don't want to use HPA for the ingress gateway, you can disable it:
+-------------------------------------------------
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  components:
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        k8s:
+          hpaSpec:
+            minReplicas: 0
+            maxReplicas: 0
+          replicaCount: 10  # Your desired fixed count
+-------------------------------------------------
+
+
+
+Or you can customize the HPA settings:
+-------------------------------------------------
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  components:
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        k8s:
+          hpaSpec:
+            minReplicas: 2
+            maxReplicas: 10
+            metrics:
+              - type: Resource
+                resource:
+                  name: cpu
+                  targetAverageUtilization: 70
+-------------------------------------------------
+
+
+We can find ingressgateways manifests here - C:\Users\your_user\istio-1.23.0\manifests\charts\gateways\istio-ingress
+
+We can find all Istio components manifests here - C:\Users\your_user\istio-1.23.0\manifests\charts
+
+
+RESOURCE USAGE
+--------------
+
+We should check and adjust Istio resource requests usage. 
+
+Check what resources uses istiod container
+	bash --> kubectl describe deployment istiod -n istio-system | grep -A 5 -i requests
+
+# result:
+    Requests:
+      cpu:      500m
+      memory:   2Gi
+    Readiness:  http-get http://:8080/ready delay=1s timeout=5s period=3s #success=1 #failure=3
+    Environment:
+      REVISION:                  default
+
+
+Check what resources ingressgateway is using:
+	bash --> kubectl get deployment istio-ingressgateway -n istio-system -o yaml | grep -A 10 resources
+
+# result:
+        resources:
+          limits:
+            cpu: "2"
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+
+
+Check a specific pod with sidecar
+	bash --> kubectl get pod <your-pod-name> -n <namespace> -o yaml | grep -A 10 resources
+
+Or describe it	
+	bash --> kubectl describe pod <your-pod-name> -n <namespace>
+
+
+
+Using istioctl proxy-config (for running sidecars)
+--------------------------------------------------
+Get proxy configuration
+	bash --> istioctl proxy-config -n <namespace> <pod-name>
+
+View specific pod's sidecar container details
+	bash --> kubectl get pod <pod-name> -n <namespace> -o jsonpath='{.spec.containers[?(@.name=="istio-proxy")].resources}'
+
+
+
+
+
+Default Resource Requests by Profile
+------------------------------------
+
+Default Resource Requests/Limits
+For Sidecar Proxies (istio-proxy):
+Default profile:
+	Requests: CPU: 100m, Memory: 128Mi
+	Limits: CPU: 2000m (2 cores), Memory: 1024Mi
+
+Demo profile:
+	Requests: CPU: 10m, Memory: 40Mi
+	Limits: CPU: 2000m, Memory: 1024Mi
+
+For istiod (Control Plane):
+The default varies, but typical production values are around:
+	Requests: CPU: 500m-1000m, Memory: 1.5-2Gi
+	Limits: Usually not set or higher
+
+
+
+
+Quick Commands to Check Current Resources
+-----------------------------------------
+
+Check all istio-system resources
+	bash --> kubectl get deploy -n istio-system -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .spec.template.spec.containers[*]}  {.name}: {.resources}{"\n"}{end}{"\n"}{end}'
+
+Check specific components:
+
+istiod
+	bash --> kubectl get deploy istiod -n istio-system -o jsonpath='{.spec.template.spec.containers[0].resources}' | jq
+
+ingress gateway
+	bash --> kubectl get deploy istio-ingressgateway -n istio-system -o jsonpath='{.spec.template.spec.containers[0].resources}' | jq
+
+Any pod with sidecar
+	bash --> kubectl get pod <pod-name> -n <namespace> -o jsonpath='{.spec.containers[?(@.name=="istio-proxy")].resources}' | jq
+
+
+
+
+
+How to Change Resource Requests Globally
+----------------------------------------
+
+Option 1: Using IstioOperator (Recommended)
+
+For sidecar proxies globally:
+-------------------------------------------------
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  namespace: istio-system
+  name: istiocontrolplane
+spec:
+  profile: default
+  values:
+    global:
+      proxy:
+        resources:
+          requests:
+            cpu: 20m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+-------------------------------------------------
+
+
+For istiod:
+-------------------------------------------------
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2048Mi
+          limits:
+            cpu: 1000m
+            memory: 4096Mi
+-------------------------------------------------
+
+
+Option 2: Per-Pod Annotations (Override for specific workloads)
+
+Add these annotations to your deployment's pod template:
+-------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    metadata:
+      annotations:
+        # Requests
+        sidecar.istio.io/proxyCPU: "50m"
+        sidecar.istio.io/proxyMemory: "128Mi"
+        # Limits
+        sidecar.istio.io/proxyCPULimit: "200m"
+        sidecar.istio.io/proxyMemoryLimit: "256Mi"
+    spec:
+      containers:
+      - name: my-app
+        image: my-app:latest
+-------------------------------------------------
+
+
+Important Notes
+
+1. After changing global settings, you need to:
+	Restart workload pods (the sidecar injector only affects new pods)
+	Rolling restart: 
+		terminal --> kubectl rollout restart deployment <deployment-name> -n <namespace>
+
+2. The high default CPU limit (2000m) is intentional to allow for traffic spikes, but it can cause cluster over-commitment. Many users reduce this to something more reasonable like 200m-500m.
+
+3. To view what would be injected:
+	terminal --> kubectl -n istio-system get configmap istio-sidecar-injector -o yaml
+
+This will show you the exact template used for sidecar injection including resource specifications.
+
+
+
+
+
+
+
+
+63. Generating YAML Manifests
+=============================
+
+Generate cluster template with Istio and save it:
+	terminal --> istioctl manifest generate -f tuned_default_settings.yaml > plain-kubernetes.yaml
+
+	# The file is 18000 lines
+	# We can see all configurations and tune some if we want
+	# All these configurations are for base Istio installation (No Kiali, Prometheus, Jaeger or Grafana)
+
+We cannot apply this template at ones
+	1. We need to add istio-system as namespace in the CRDs template
+	2. We need to separate CRDs from the file and apply them manually FIRST!
+
+	The example is with the provided course resources files
+		- 1-istio-init.yaml				# CRDs
+		- 2-istio-minikube.yaml				# Cluster template
+
+The first few lines of the 1-istio-init.yaml file are namespace configuration
+---------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+---------------------------
+
+This files can be used to regenerate a cluster with a script that deploy YAML files from a directory (backup directory) using only kubectl and not installing and adding complexity of istioctl.
+
+
+If we want to use our own addons template we need to configure services (grafana, Jaeger, Kiali) to be of type NodePort so we can access them outside the cluster or set a Load Balancer for this purpose.
+
