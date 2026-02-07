@@ -60,7 +60,13 @@ Download latest istio
 	bash --> cd istio-1.23.0
 	
 Add to PATH
-	bash --> export PATH=$PWD/bin:$PATH
+	bash --> export PATH="$PATH:$PWD/bin"
+
+Reload the terminal 
+	bash --> source ~/.bashrc
+
+Confirm installation
+	terminal --> istioctl version --remote=false
 
 Install Istio
 	bash --> istioctl install --set profile=demo -y
