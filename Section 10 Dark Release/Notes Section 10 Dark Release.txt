@@ -49,7 +49,7 @@ Navigate to the resource folder and setup the scenario:
 
 
 	Deply provided resources
-		terminal --> cd 1-Telemetry
+		terminal --> cd Manifests
 		
 ISNTALL LATEST ISTIO - for Widnows
 --------------------
